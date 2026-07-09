@@ -1,0 +1,89 @@
+# ============================================================
+# .NET / Visual Studio
+# ============================================================
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio
+.vs/
+*.user
+*.userosscache
+*.suo
+*.userprefs
+*.dbmdl
+*.dbproj.schemaview
+*.jfm
+
+# Build artifacts
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# .NET Core
+*.swp
+*.*~
+*.dll
+*.exe
+*.pdb
+
+# NuGet
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+*.nuget.props
+*.nuget.targets
+
+# Test results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+*.trx
+*.coverage
+*.coveragexml
+coverage/
+
+# Rider
+.idea/
+*.sln.iml
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# ============================================================
+# ROCloud — secrets & local artifacts (guide §12 / §10.12)
+# ============================================================
+.env
+.env.*
+!.env.example
+# appsettings.Production.json
+# appsettings.Local.json
+# Dev config carries the local DB password + machine-specific CORS origins — never commit it.
+# Keep a sanitized appsettings.Development.example.json for the team instead.
+# appsettings.Development.json
+**/*.pfx
+**/*.key
+**/*.crt
+**/*.pem
+.certs/
+/publish/
+
+# Local file storage (uploaded files)
+App_Data/files/

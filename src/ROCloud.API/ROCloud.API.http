@@ -1,0 +1,6 @@
+@ROCloud.API_HostAddress = http://localhost:5128
+
+GET {{ROCloud.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
