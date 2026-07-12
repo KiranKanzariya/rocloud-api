@@ -25,10 +25,12 @@ public class RegisterGoogleCommandHandler : IRequestHandler<RegisterGoogleComman
     private readonly AuthTokenIssuer _issuer;
     private readonly IEmailService _email;
     private readonly IAppSettings _settings;
+    private readonly INotificationTemplateRenderer _templates;
 
     public RegisterGoogleCommandHandler(
         IAppDbContext db, IGoogleAuthService google, TenantProvisioner provisioner,
-        AuthTokenIssuer issuer, IEmailService email, IAppSettings settings)
+        AuthTokenIssuer issuer, IEmailService email, IAppSettings settings,
+        INotificationTemplateRenderer templates)
     {
         _db = db;
         _google = google;
@@ -36,6 +38,7 @@ public class RegisterGoogleCommandHandler : IRequestHandler<RegisterGoogleComman
         _issuer = issuer;
         _email = email;
         _settings = settings;
+        _templates = templates;
     }
 
     public async Task<AuthResult> Handle(RegisterGoogleCommand request, CancellationToken ct)
@@ -100,13 +103,23 @@ public class RegisterGoogleCommandHandler : IRequestHandler<RegisterGoogleComman
         var result = await _issuer.IssueAsync(provision.Owner, tenant, provision.OwnerPermissions, ct);
 
         var loginUrl = _settings.TenantUrlFormat.Replace("{subdomain}", subdomain);
+        var tokens = new Dictionary<string, string>
+        {
+            ["OwnerName"] = info.Name,
+            ["LoginUrl"] = loginUrl,
+            ["TrialEndsAt"] = tenant.TrialEndsAt?.ToString("d MMM yyyy") ?? string.Empty,
+        };
+        var rendered = await _templates.RenderAsync(
+            null, "welcome_google", tenant.DefaultLanguage, "Email", tokens, ct);
+
         await _email.SendAsync(
             info.Email,
-            "Welcome to ROCloud",
-            $"Hello {info.Name}, welcome to ROCloud!\n\n" +
-            $"Your portal is ready at: {loginUrl}\n" +
-            $"Sign in there any time with Google using this email address. Bookmark the link so you can find it again.\n\n" +
-            $"Your free trial runs until {tenant.TrialEndsAt:d MMM yyyy}.",
+            rendered?.Subject ?? "Welcome to ROCloud",
+            rendered?.Body ??
+                $"Hello {info.Name}, welcome to ROCloud!\n\n" +
+                $"Your portal is ready at: {loginUrl}\n" +
+                $"Sign in there any time with Google using this email address. Bookmark the link so you can find it again.\n\n" +
+                $"Your free trial runs until {tenant.TrialEndsAt:d MMM yyyy}.",
             ct);
 
         return result;

@@ -14,7 +14,7 @@ namespace ROCloud.Application.Features.Subscription.Commands.CompleteUpgrade;
 /// token refresh (the refresh handler reads tenant.Plan from the DB).
 ///
 /// SECURITY (guide §25): a paid upgrade is only applied after the Razorpay order is verified paid
-/// SERVER-SIDE (not trusting the client), so a Settings.Manage user can't change plan without paying.
+/// SERVER-SIDE (not trusting the client), so even the Owner can't change plan without paying.
 /// Free upgrades (₹0 net) and the dev/unconfigured path skip payment. <see cref="OrderId"/> is the
 /// Razorpay order created by InitiateSubscription.
 /// </summary>

@@ -1,33 +1,36 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
+using ROCloud.Application.Common.Interfaces;
+using ROCloud.Application.Features.Subscription;
+using ROCloud.Domain.Enums;
 
 namespace ROCloud.API.Filters;
 
 /// <summary>
-/// Requires the tenant's plan to be at least the given tier (Basic &lt; Pro &lt; Enterprise).
-/// Returns 403 with an upgrade hint otherwise.
+/// Requires the tenant's plan to be at least the given tier. Returns 403 with an upgrade hint otherwise.
+/// Tier order is the PlanType declaration order (Basic &lt; Pro &lt; Enterprise), which the plans.plan_type
+/// CHECK constraint mirrors.
+///
+/// The tier is read from the database, not from the JWT's plan_type claim: the admin portal can change a
+/// tenant's plan without re-issuing that tenant's token, so the claim lags by up to an access-token
+/// lifetime — long enough for a downgraded tenant to keep using the feature they no longer pay for.
 /// </summary>
 [AttributeUsage(AttributeTargets.Method | AttributeTargets.Class)]
 public class RequirePlanAttribute : Attribute, IAsyncActionFilter
 {
-    private static readonly Dictionary<string, int> PlanOrder = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["Basic"] = 1,
-        ["Pro"] = 2,
-        ["Enterprise"] = 3
-    };
+    private readonly PlanType _minimumPlan;
 
-    private readonly string _minimumPlan;
-
-    public RequirePlanAttribute(string minimumPlan) => _minimumPlan = minimumPlan;
+    public RequirePlanAttribute(PlanType minimumPlan) => _minimumPlan = minimumPlan;
 
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
-        var current = context.HttpContext.User.FindFirst("plan_type")?.Value ?? "Basic";
-        var currentRank = PlanOrder.GetValueOrDefault(current, 0);
-        var requiredRank = PlanOrder.GetValueOrDefault(_minimumPlan, int.MaxValue);
+        var services = context.HttpContext.RequestServices;
+        var db = services.GetRequiredService<IAppDbContext>();
+        var tenantContext = services.GetRequiredService<ITenantContext>();
 
-        if (currentRank < requiredRank)
+        var tier = await PlanFeatures.TierAsync(db, tenantContext.TenantId, context.HttpContext.RequestAborted);
+
+        if (tier is null || tier < _minimumPlan)
         {
             context.Result = new ObjectResult(new
             {

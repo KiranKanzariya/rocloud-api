@@ -12,7 +12,7 @@ namespace ROCloud.API.Controllers.Tenant;
 
 /// <summary>
 /// Per-tenant notification templates (guide §24): Email/SMS/WhatsApp message bodies. Reads need
-/// Settings.View; writes need Settings.Manage. WhatsApp is a Pro+ feature, gated in the portal UI.
+/// Notifications.View; writes need Notifications.Manage. WhatsApp is a Pro+ feature, gated in the portal UI.
 /// </summary>
 [ApiController]
 [Route("api/notification-templates")]
@@ -24,13 +24,13 @@ public class NotificationTemplatesController : ControllerBase
     public NotificationTemplatesController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet]
-    [RequirePermission("Settings.View")]
+    [RequirePermission("Notifications.View")]
     public async Task<IActionResult> Get([FromQuery] string? channel, CancellationToken ct)
         => Ok(ApiResponse<IReadOnlyList<NotificationTemplateDto>>.Ok(
             await _mediator.Send(new GetNotificationTemplatesQuery(channel), ct)));
 
     [HttpPut]
-    [RequirePermission("Settings.Manage")]
+    [RequirePermission("Notifications.Manage")]
     public async Task<IActionResult> Upsert([FromBody] UpsertNotificationTemplateCommand command, CancellationToken ct)
     {
         var id = await _mediator.Send(command, ct);
@@ -39,7 +39,7 @@ public class NotificationTemplatesController : ControllerBase
 
     /// <summary>Delete the tenant's own override, reverting the template to the system default.</summary>
     [HttpDelete("{id:guid}")]
-    [RequirePermission("Settings.Manage")]
+    [RequirePermission("Notifications.Manage")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         await _mediator.Send(new DeleteNotificationTemplateCommand(id), ct);

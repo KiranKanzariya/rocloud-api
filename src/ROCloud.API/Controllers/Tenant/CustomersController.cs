@@ -177,7 +177,7 @@ public sealed record UpdateCustomerSubscriptionRequest(
     int Quantity, string Frequency, decimal? RatePerUnit);
 
 public sealed record UpdateCustomerRequest(
-    Guid? AreaId, string Name, string Mobile, string? AlternateMobile, string? Email,
+    Guid? AreaId, string Name, string? Mobile, string? AlternateMobile, string? Email,
     string? AddressLine, string? Landmark, decimal? Latitude, decimal? Longitude,
     string DeliveryMode, string PaymentPreference, string? PreferredBottleSize,
     string? PreferredLanguage, string? Notes, bool IsActive);

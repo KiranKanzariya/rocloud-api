@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Interfaces;
 using ROCloud.Application.Common.Models;
 using ROCloud.Application.Features.Orders.Dtos;
+using ROCloud.Application.Features.Payments;
 using ROCloud.Domain.Entities.Tenant;
 using ROCloud.Domain.Enums;
 
@@ -77,13 +78,13 @@ public class GetOrdersQueryHandler : IRequestHandler<GetOrdersQuery, PagedResult
             })
             .ToListAsync(ct);
 
-        // FIFO-allocate each customer's payment pool across their delivered, uninvoiced orders so the
-        // per-order badge reflects lump-sum / advance payments (allocation spans ALL such orders, not
-        // just this page).
+        // FIFO-allocate each customer's payment pool across everything they owe so the per-order badge
+        // reflects lump-sum / advance payments. The ladder spans ALL their obligations — not just this
+        // page, and not just orders — so an older open invoice is settled before any order here is.
         var customerIds = rows
             .Where(r => r.Status == OrderStatus.Delivered && !r.Invoiced)
             .Select(r => r.CustomerId).Distinct().ToList();
-        var allocations = await OrderPaymentAllocator.ComputeAsync(_db, customerIds, ct);
+        var allocations = (await CustomerObligationAllocator.ComputeAsync(_db, customerIds, ct)).Orders;
 
         var items = rows.Select(r =>
         {

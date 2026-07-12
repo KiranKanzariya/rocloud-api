@@ -19,8 +19,8 @@ public static class OrderPaymentStatus
 
     /// <summary>
     /// Status of a delivered, NOT-yet-invoiced order from the amount FIFO-allocated to it from the
-    /// customer's payment pool (see <see cref="OrderPaymentAllocator"/>). Lets a single lump-sum or
-    /// advance payment mark older orders Paid even though it isn't linked to each one.
+    /// customer's payment pool (see <see cref="Payments.CustomerObligationAllocator"/>). Lets a single
+    /// lump-sum or advance payment mark older orders Paid even though it isn't linked to each one.
     /// </summary>
     public static string FromAllocation(decimal total, decimal allocated)
     {

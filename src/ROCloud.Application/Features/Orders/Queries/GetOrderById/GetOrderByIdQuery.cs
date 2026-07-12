@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
 using ROCloud.Application.Features.Orders.Dtos;
+using ROCloud.Application.Features.Payments;
 using ROCloud.Domain.Enums;
 
 namespace ROCloud.Application.Features.Orders.Queries.GetOrderById;
@@ -35,9 +36,10 @@ public class GetOrderByIdQueryHandler : IRequestHandler<GetOrderByIdQuery, Order
             && inv.PeriodFrom != null && inv.PeriodTo != null
             && order.OrderDate >= inv.PeriodFrom && order.OrderDate <= inv.PeriodTo, ct);
 
-        // FIFO-applied amount for this order (only relevant when delivered + uninvoiced).
+        // FIFO-applied amount for this order (only relevant when delivered + uninvoiced). The pool is
+        // drained by the customer's older obligations — open invoices included — before it reaches here.
         var allocations = order.Status == OrderStatus.Delivered && !invoiced
-            ? await OrderPaymentAllocator.ComputeAsync(_db, new[] { order.CustomerId }, ct)
+            ? (await CustomerObligationAllocator.ComputeAsync(_db, new[] { order.CustomerId }, ct)).Orders
             : new Dictionary<Guid, decimal>();
         var (amountPaid, paymentStatus) = OrderPaymentStatus.Resolve(
             order.Status, invoiced, total, allocations.GetValueOrDefault(order.Id, 0m));

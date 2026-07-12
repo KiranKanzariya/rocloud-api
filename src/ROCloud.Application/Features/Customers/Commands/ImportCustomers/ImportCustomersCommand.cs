@@ -149,8 +149,7 @@ public class ImportCustomersCommandHandler : IRequestHandler<ImportCustomersComm
                     parsed.AreaId, name, mobile, NullIfBlank(Get(row, "alternate_mobile")), NullIfBlank(Get(row, "email")),
                     NullIfBlank(Get(row, "address_line")), NullIfBlank(Get(row, "landmark")), null, null,
                     parsed.DeliveryMode, parsed.PaymentPreference, parsed.PreferredBottleSize,
-                    NullIfBlank(Get(row, "preferred_language")), NullIfBlank(Get(row, "notes")),
-                    AllowMissingMobile: true), ct);
+                    NullIfBlank(Get(row, "preferred_language")), NullIfBlank(Get(row, "notes"))), ct);
             }
             catch (ValidationException ex)
             {

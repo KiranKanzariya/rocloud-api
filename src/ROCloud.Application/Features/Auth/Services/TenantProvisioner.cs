@@ -34,7 +34,11 @@ public class TenantProvisioner
             "Payments.View", "Payments.Collect", "Payments.Manage",
             "Reports.View",
             "AMC.View", "AMC.Manage", "AMC.Update",
-            "Users.View", "Settings.View"
+            // Roles.View accompanies Users.View — the users screen renders role names.
+            "Users.View", "Roles.View",
+            // Read-only on the settings pages, as before. The ROCloud subscription is Owner-only and
+            // is not a permission at all, so a Manager cannot change the plan or spend the owner's money.
+            "Areas.View", "Notifications.View", "BusinessProfile.View"
         ],
         ["DeliveryBoy"] =
         [
@@ -57,7 +61,9 @@ public class TenantProvisioner
         ["Viewer"] =
         [
             "Customers.View", "Orders.View", "Deliveries.View", "Inventory.View",
-            "Invoices.View", "Payments.View", "Reports.View", "AMC.View", "Users.View", "Settings.View"
+            "Invoices.View", "Payments.View", "Reports.View", "AMC.View",
+            "Users.View", "Roles.View",
+            "Areas.View", "Notifications.View", "BusinessProfile.View"
         ]
     };
 

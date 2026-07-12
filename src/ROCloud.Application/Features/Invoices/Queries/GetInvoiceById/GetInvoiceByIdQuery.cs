@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
 using ROCloud.Application.Features.Invoices.Dtos;
+using ROCloud.Application.Features.Payments;
 
 namespace ROCloud.Application.Features.Invoices.Queries.GetInvoiceById;
 
@@ -25,6 +26,14 @@ public class GetInvoiceByIdQueryHandler : IRequestHandler<GetInvoiceByIdQuery, I
         var to = invoice.PeriodTo ?? invoice.InvoiceDate;
         var lines = await InvoiceLineBuilder.BuildAsync(_db, invoice.CustomerId, from, to, ct);
 
+        // Payments the owner recorded against the customer rather than this invoice still settle it —
+        // FIFO, oldest obligation first. Report the resolved money, and how much of it came that way.
+        var allocations = (await CustomerObligationAllocator.ComputeAsync(
+            _db, new[] { invoice.CustomerId }, ct)).Invoices;
+        var allocated = allocations.GetValueOrDefault(invoice.Id, 0m);
+        var (paidAmount, balance, status) = InvoicePaymentStatus.Resolve(
+            invoice.Status, invoice.TotalAmount, invoice.PaidAmount, allocated);
+
         return new InvoiceDto(
             invoice.Id,
             invoice.InvoiceNumber,
@@ -39,9 +48,10 @@ public class GetInvoiceByIdQueryHandler : IRequestHandler<GetInvoiceByIdQuery, I
             invoice.TaxAmount,
             invoice.Discount,
             invoice.TotalAmount,
-            invoice.PaidAmount,
-            invoice.TotalAmount - invoice.PaidAmount,
-            invoice.Status.ToString(),
+            paidAmount,
+            balance,
+            allocated,
+            status.ToString(),
             invoice.GstNumber,
             invoice.Notes,
             invoice.PdfUrl,

@@ -14,7 +14,7 @@ public sealed record UpdateCustomerCommand(
     Guid Id,
     Guid? AreaId,
     string Name,
-    string Mobile,
+    string? Mobile,
     string? AlternateMobile,
     string? Email,
     string? AddressLine,
@@ -36,8 +36,11 @@ public class UpdateCustomerCommandValidator : AbstractValidator<UpdateCustomerCo
         RuleFor(c => c.Name)
             .NotEmpty().Length(2, 200)
             .Matches(@"^[\p{L}\p{N}\s.\-,']+$").WithMessage("Name contains invalid characters.");
+        // Optional, like CreateCustomer — otherwise a customer imported without a number could never
+        // be edited without inventing one. Format is still enforced when a number IS given.
         RuleFor(c => c.Mobile)
-            .NotEmpty().Matches(@"^\+91[0-9]{10}$").WithMessage("Invalid mobile number.");
+            .Matches(@"^\+91[0-9]{10}$").When(c => !string.IsNullOrEmpty(c.Mobile))
+            .WithMessage("Invalid mobile number.");
         RuleFor(c => c.Email)
             .EmailAddress().MaximumLength(200).When(c => !string.IsNullOrEmpty(c.Email));
         RuleFor(c => c.AddressLine).MaximumLength(500);
@@ -61,9 +64,12 @@ public class UpdateCustomerCommandHandler : IRequestHandler<UpdateCustomerComman
         var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == request.Id, ct)
                        ?? throw new NotFoundException("Customer", request.Id);
 
-        if (customer.Mobile != request.Mobile)
+        var mobile = string.IsNullOrWhiteSpace(request.Mobile) ? null : request.Mobile;
+
+        // Uniqueness applies to a real number only: any number of customers may have none at all.
+        if (mobile is not null && customer.Mobile != mobile)
         {
-            var mobileTaken = await _db.Customers.AnyAsync(c => c.Mobile == request.Mobile && c.Id != request.Id, ct);
+            var mobileTaken = await _db.Customers.AnyAsync(c => c.Mobile == mobile && c.Id != request.Id, ct);
             if (mobileTaken)
                 throw new ValidationException(new Dictionary<string, string[]>
                 {
@@ -73,7 +79,7 @@ public class UpdateCustomerCommandHandler : IRequestHandler<UpdateCustomerComman
 
         customer.AreaId = request.AreaId;
         customer.Name = request.Name;
-        customer.Mobile = request.Mobile;
+        customer.Mobile = mobile;
         customer.AlternateMobile = request.AlternateMobile;
         customer.Email = request.Email;
         customer.AddressLine = request.AddressLine;

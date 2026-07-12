@@ -35,8 +35,9 @@ public class ServiceRequestsController : ControllerBase
     public async Task<IActionResult> GetServiceRequest(Guid id, CancellationToken ct)
         => Ok(ApiResponse<ServiceRequestDto>.Ok(await _mediator.Send(new GetServiceRequestByIdQuery(id), ct)));
 
+    // Listing your own assigned jobs is a read; the query already scopes to the calling user.
     [HttpGet("mine")]
-    [RequirePermission("AMC.Update")]
+    [RequirePermission("AMC.View")]
     public async Task<IActionResult> GetMyJobs([FromQuery] string? status, CancellationToken ct)
         => Ok(ApiResponse<IReadOnlyList<ServiceRequestListItemDto>>.Ok(
             await _mediator.Send(new GetMyServiceJobsQuery(status), ct)));

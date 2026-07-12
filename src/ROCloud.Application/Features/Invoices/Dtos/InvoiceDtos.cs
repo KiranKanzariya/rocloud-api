@@ -32,6 +32,12 @@ public sealed record InvoiceDto(
     decimal TotalAmount,
     decimal PaidAmount,
     decimal Balance,
+    /// <summary>
+    /// How much of <see cref="PaidAmount"/> came from the customer's unallocated payment pool rather
+    /// than a payment linked to this invoice — those payments won't appear in this invoice's payment
+    /// list, so the UI says where the money came from instead of leaving a "Paid" with no receipts.
+    /// </summary>
+    decimal AllocatedFromPool,
     string Status,
     string? GstNumber,
     string? Notes,

@@ -80,8 +80,17 @@ public class SubscriptionInvoiceDelivery : ISubscriptionInvoiceDelivery
             if (!_settings.EmailEnabled || string.IsNullOrWhiteSpace(tenant.OwnerEmail))
                 return;
 
-            var subject = $"Payment received — ROCloud invoice {invoice.InvoiceNumber}";
-            var body =
+            var tokens = new Dictionary<string, string>
+            {
+                ["TenantName"] = tenant.Name,
+                ["InvoiceNumber"] = invoice.InvoiceNumber,
+                ["Amount"] = invoice.Amount.ToString("N2"),
+            };
+            var rendered = await _templates.RenderAsync(
+                null, "subscription_receipt", tenant.DefaultLanguage, "Email", tokens, ct);
+
+            var subject = rendered?.Subject ?? $"Payment received — ROCloud invoice {invoice.InvoiceNumber}";
+            var body = rendered?.Body ??
                 $"Hi {tenant.Name}, we've received your payment of ₹{invoice.Amount:N2} for invoice " +
                 $"{invoice.InvoiceNumber}. Your ROCloud subscription is active. Thank you!";
 

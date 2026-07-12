@@ -13,13 +13,17 @@ public class ForgotPasswordCommandHandler : IRequestHandler<ForgotPasswordComman
     private readonly ICacheService _cache;
     private readonly IEmailService _email;
     private readonly IAppSettings _settings;
+    private readonly INotificationTemplateRenderer _templates;
 
-    public ForgotPasswordCommandHandler(IAppDbContext db, ICacheService cache, IEmailService email, IAppSettings settings)
+    public ForgotPasswordCommandHandler(
+        IAppDbContext db, ICacheService cache, IEmailService email, IAppSettings settings,
+        INotificationTemplateRenderer templates)
     {
         _db = db;
         _cache = cache;
         _email = email;
         _settings = settings;
+        _templates = templates;
     }
 
     public async Task Handle(ForgotPasswordCommand request, CancellationToken ct)
@@ -42,10 +46,30 @@ public class ForgotPasswordCommandHandler : IRequestHandler<ForgotPasswordComman
             var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
             await _cache.SetAsync($"pwreset:{token}", new PasswordResetToken(user.Id), TimeSpan.FromMinutes(ttlMinutes), ct);
 
+            // Send a clickable link to the portal's reset page — it reads the token from ?token=.
+            // A raw token alone leaves the owner with nothing actionable. `tenant` is non-null here
+            // (a user is only resolved once the tenant was).
+            var resetUrl =
+                $"{_settings.TenantUrlFormat.Replace("{subdomain}", tenant!.Subdomain)}/reset-password?token={token}";
+
+            var tokens = new Dictionary<string, string>
+            {
+                ["Name"] = user.Name,
+                ["ResetUrl"] = resetUrl,
+                ["Minutes"] = ttlMinutes.ToString(),
+            };
+            // Platform mail — render the shared default (tenant_id NULL) in the tenant's language.
+            var rendered = await _templates.RenderAsync(
+                null, "password_reset", tenant.DefaultLanguage, "Email", tokens, ct);
+
             await _email.SendAsync(
                 user.Email,
-                "Reset your ROCloud password",
-                $"Use this token to reset your password (valid for {ttlMinutes} minutes): {token}",
+                rendered?.Subject ?? "Reset your ROCloud password",
+                rendered?.Body ??
+                    $"Hi {user.Name}, we received a request to reset the password for your ROCloud account.\n\n" +
+                    $"<a href=\"{resetUrl}\">Reset your password</a>\n\n" +
+                    $"This link is valid for {ttlMinutes} minutes and can be used once.\n\n" +
+                    $"If you didn't request this, you can safely ignore this email — your password will not change.",
                 ct);
         }
 

@@ -18,7 +18,10 @@ public class GetDeliveryBoardQueryHandler : IRequestHandler<GetDeliveryBoardQuer
 
     public async Task<DeliveryBoardDto> Handle(GetDeliveryBoardQuery request, CancellationToken ct)
     {
-        var query = GetDeliveriesQueryHandler.ApplyFilter(_db.Deliveries, request.Filter);
+        // Cancelling an order leaves its delivery row behind as Skipped, so the board must exclude
+        // them explicitly — otherwise they resurface as "Delivered" stops or "Awaiting pickup" cards.
+        var query = GetDeliveriesQueryHandler.ApplyFilter(_db.Deliveries, request.Filter)
+            .Where(d => d.Order == null || d.Order.Status != OrderStatus.Cancelled);
 
         var all = await query
             .OrderBy(d => d.ScheduledDate).ThenBy(d => d.Id)

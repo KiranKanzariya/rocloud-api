@@ -23,10 +23,7 @@ public sealed record CreateCustomerCommand(
     string PaymentPreference,
     string? PreferredBottleSize,
     string? PreferredLanguage,
-    [property: SanitizeHtml] string? Notes,
-    // Set true only by the CSV import — lets a customer be created without a mobile. The manual
-    // create path leaves this false so the Add-customer form/API still requires a mobile.
-    bool AllowMissingMobile = false) : IRequest<Guid>;
+    [property: SanitizeHtml] string? Notes) : IRequest<Guid>;
 
 public class CreateCustomerCommandValidator : AbstractValidator<CreateCustomerCommand>
 {
@@ -36,8 +33,9 @@ public class CreateCustomerCommandValidator : AbstractValidator<CreateCustomerCo
             .NotEmpty().Length(2, 200)
             .Matches(@"^[\p{L}\p{N}\s.\-,']+$").WithMessage("Name contains invalid characters.");
 
-        RuleFor(c => c.Mobile)
-            .NotEmpty().When(c => !c.AllowMissingMobile).WithMessage("Mobile number is required.");
+        // Mobile is OPTIONAL — an owner may not have every customer's number (a shop, an old book
+        // entry). Validate the format only when one is given; the mobile-less customer is then
+        // identified by name, and mobile-only features (WhatsApp, SMS) simply skip them.
         RuleFor(c => c.Mobile)
             .Matches(@"^\+91[0-9]{10}$").When(c => !string.IsNullOrEmpty(c.Mobile))
             .WithMessage("Invalid mobile number.");

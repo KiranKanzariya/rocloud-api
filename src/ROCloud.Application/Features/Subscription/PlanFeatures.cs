@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
+using ROCloud.Domain.Enums;
 
 namespace ROCloud.Application.Features.Subscription;
 
@@ -32,6 +33,17 @@ public static class PlanFeatures
         var plan = await PlanOf(db, tenantId, ct);
         return plan?.WhatsappEnabled ?? false;
     }
+
+    /// <summary>
+    /// The tenant's current tier, read from the DB. Callers must not rank the JWT's plan_type claim
+    /// instead: an admin-portal plan change does not re-issue the tenant's token, so that claim stays
+    /// stale for up to an access-token lifetime (a downgraded tenant would keep Pro access meanwhile).
+    /// </summary>
+    public static Task<PlanType?> TierAsync(IAppDbContext db, Guid tenantId, CancellationToken ct)
+        => db.Tenants
+            .Where(t => t.Id == tenantId)
+            .Select(t => (PlanType?)t.Plan!.PlanType)
+            .FirstOrDefaultAsync(ct);
 
     private static Task<PlanFeatureSet?> PlanOf(IAppDbContext db, Guid tenantId, CancellationToken ct)
         => db.Tenants

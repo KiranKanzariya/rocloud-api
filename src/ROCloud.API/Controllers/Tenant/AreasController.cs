@@ -12,7 +12,7 @@ using ROCloud.Application.Features.Areas.Queries.GetAreas;
 namespace ROCloud.API.Controllers.Tenant;
 
 /// <summary>
-/// Delivery areas / zones (guide §24). Reads need Settings.View; writes need Settings.Manage.
+/// Delivery areas / zones (guide §24). Reads need Areas.View; writes need Areas.Manage.
 /// </summary>
 [ApiController]
 [Route("api/areas")]
@@ -24,12 +24,12 @@ public class AreasController : ControllerBase
     public AreasController(IMediator mediator) => _mediator = mediator;
 
     [HttpGet]
-    [RequirePermission("Settings.View")]
+    [RequirePermission("Areas.View")]
     public async Task<IActionResult> GetAreas([FromQuery] bool includeInactive, CancellationToken ct)
         => Ok(ApiResponse<IReadOnlyList<AreaDto>>.Ok(await _mediator.Send(new GetAreasQuery(includeInactive), ct)));
 
     [HttpPost]
-    [RequirePermission("Settings.Manage")]
+    [RequirePermission("Areas.Manage")]
     public async Task<IActionResult> Create([FromBody] CreateAreaCommand command, CancellationToken ct)
     {
         var id = await _mediator.Send(command, ct);
@@ -37,7 +37,7 @@ public class AreasController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
-    [RequirePermission("Settings.Manage")]
+    [RequirePermission("Areas.Manage")]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateAreaRequest body, CancellationToken ct)
     {
         await _mediator.Send(new UpdateAreaCommand(id, body.Name, body.City, body.Pincode, body.IsActive), ct);
@@ -45,7 +45,7 @@ public class AreasController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
-    [RequirePermission("Settings.Manage")]
+    [RequirePermission("Areas.Manage")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
     {
         await _mediator.Send(new DeleteAreaCommand(id), ct);

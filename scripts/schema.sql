@@ -613,13 +613,16 @@ ALTER ROLE rocloud_app BYPASSRLS;
 -- SEED DATA — PLANS (3)
 -- ============================================================
 
-INSERT INTO plans (name, plan_type, monthly_price, yearly_price, max_customers, max_users, max_delivery_boys, whatsapp_enabled, custom_roles_enabled, multi_branch_enabled) VALUES
-('Basic',      'Basic',      999.00,  9990.00,  200,  3,  1, false, false, false),
-('Pro',        'Pro',       2499.00, 24990.00, 1000, 10,  5, true,  false, false),
-('Enterprise', 'Enterprise', 5999.00, 59990.00, 99999, 99, 99, true, true,  true);
+-- max_customers / max_users / max_delivery_boys: 0 = unlimited (Plan.Unlimited).
+-- whatsapp_enabled, multi_branch_enabled, api_access_enabled are false on every plan:
+-- those features are not built yet and both portals render them as "coming soon".
+INSERT INTO plans (name, plan_type, monthly_price, yearly_price, max_customers, max_users, max_delivery_boys, whatsapp_enabled, custom_roles_enabled, multi_branch_enabled, api_access_enabled, is_active) VALUES
+('Basic',      'Basic',     1099.00,  9990.00,  200,  3,  1, false, false, false, false, true),
+('Pro',        'Pro',       2499.00, 24990.00, 1000, 10,  5, false, false, false, false, true),
+('Enterprise', 'Enterprise', 5999.00, 59990.00,   0,  0,  0, false, true,  false, false, true);
 
 -- ============================================================
--- SEED DATA — PERMISSIONS (28)
+-- SEED DATA — PERMISSIONS (33)
 -- ============================================================
 
 INSERT INTO permissions (module, action, code) VALUES
@@ -648,6 +651,14 @@ INSERT INTO permissions (module, action, code) VALUES
 ('AMC',        'Update',  'AMC.Update'),
 ('Users',      'View',    'Users.View'),
 ('Users',      'Manage',  'Users.Manage'),
+('Roles',      'View',    'Roles.View'),
 ('Roles',      'Manage',  'Roles.Manage'),
-('Settings',   'View',    'Settings.View'),
-('Settings',   'Manage',  'Settings.Manage');
+-- One View/Manage pair per SETTINGS PAGE, not one blunt pair for all of them: granting a manager the
+-- right to add a delivery area must not also let them change the ROCloud plan. The tenant's own
+-- subscription has no permission at all — it is [RequireOwner], so no custom role can be given it.
+('Areas',            'View',   'Areas.View'),
+('Areas',            'Manage', 'Areas.Manage'),
+('Notifications',    'View',   'Notifications.View'),
+('Notifications',    'Manage', 'Notifications.Manage'),
+('Business Profile', 'View',   'BusinessProfile.View'),
+('Business Profile', 'Manage', 'BusinessProfile.Manage');

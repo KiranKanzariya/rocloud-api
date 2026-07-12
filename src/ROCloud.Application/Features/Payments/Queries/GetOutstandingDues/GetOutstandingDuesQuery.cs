@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Interfaces;
+using ROCloud.Application.Features.Invoices;
 using ROCloud.Application.Features.Payments.Dtos;
 using ROCloud.Domain.Enums;
 
@@ -25,28 +26,53 @@ public class GetOutstandingDuesQueryHandler
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var cutoff = today.AddDays(-Math.Max(0, request.OverdueDays));
 
-        var rows = await _db.Invoices
+        // Candidates by what the ROW says. An invoice can still be settled by a payment the owner
+        // recorded against the customer rather than against the invoice, so this is not the answer yet.
+        var candidates = await _db.Invoices
             .Where(i => UnpaidStatuses.Contains(i.Status)
                         && i.TotalAmount - i.PaidAmount > 0
                         && i.DueDate <= cutoff)
-            .GroupBy(i => new { i.CustomerId, Name = i.Customer!.Name, i.Customer.Mobile, i.Customer.Email, i.Customer.PreferredLanguage })
-            .Select(g => new
+            .Select(i => new
             {
-                g.Key.CustomerId,
-                g.Key.Name,
-                g.Key.Mobile,
-                g.Key.Email,
-                g.Key.PreferredLanguage,
-                InvoiceCount = g.Count(),
-                Outstanding = g.Sum(i => i.TotalAmount - i.PaidAmount),
-                OldestDueDate = g.Min(i => i.DueDate)
+                i.Id,
+                i.CustomerId,
+                Name = i.Customer!.Name,
+                i.Customer.Mobile,
+                i.Customer.Email,
+                i.Customer.PreferredLanguage,
+                i.TotalAmount,
+                i.PaidAmount,
+                i.Status,
+                i.DueDate
             })
             .ToListAsync(ct);
 
-        return rows
-            .Select(r => new OutstandingDueDto(
-                r.CustomerId, r.Name, r.Mobile, r.InvoiceCount, r.Outstanding,
-                r.OldestDueDate, today.DayNumber - r.OldestDueDate.DayNumber, r.PreferredLanguage, r.Email))
+        if (candidates.Count == 0) return [];
+
+        // …so drain each customer's unallocated payment pool over their obligations and keep only the
+        // invoices that are STILL owed. Without this the reminder chases money already in the till —
+        // e.g. an imported opening balance the owner settled from the customer page.
+        var allocations = (await CustomerObligationAllocator.ComputeAsync(
+            _db, candidates.Select(c => c.CustomerId).Distinct().ToList(), ct)).Invoices;
+
+        var unpaid = candidates
+            .Select(c => new
+            {
+                c.CustomerId, c.Name, c.Mobile, c.Email, c.PreferredLanguage, c.DueDate,
+                Balance = InvoicePaymentStatus.Resolve(
+                    c.Status, c.TotalAmount, c.PaidAmount, allocations.GetValueOrDefault(c.Id, 0m)).Balance
+            })
+            .Where(c => c.Balance > 0m);
+
+        return unpaid
+            .GroupBy(c => new { c.CustomerId, c.Name, c.Mobile, c.Email, c.PreferredLanguage })
+            .Select(g =>
+            {
+                var oldest = g.Min(x => x.DueDate);
+                return new OutstandingDueDto(
+                    g.Key.CustomerId, g.Key.Name, g.Key.Mobile, g.Count(), g.Sum(x => x.Balance),
+                    oldest, today.DayNumber - oldest.DayNumber, g.Key.PreferredLanguage, g.Key.Email);
+            })
             .OrderByDescending(r => r.OutstandingAmount)
             .ToList();
     }

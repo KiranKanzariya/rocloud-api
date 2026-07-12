@@ -19,13 +19,17 @@ public class RolesController : ControllerBase
 
     public RolesController(IMediator mediator) => _mediator = mediator;
 
+    // Reading role names is not the same right as administering roles — anyone who can see users
+    // needs it for the Role column and the assign-role dropdown. Roles.Manage is accepted too so
+    // tokens issued before Roles.View existed keep working until they roll over (permissions are
+    // a snapshot taken at login); drop it once all sessions have refreshed.
     [HttpGet]
-    [RequirePermission("Roles.Manage")]
+    [RequireAnyPermission("Roles.View", "Roles.Manage")]
     public async Task<IActionResult> GetRoles(CancellationToken ct)
         => Ok(await _mediator.Send(new GetRolesQuery(), ct));
 
     [HttpGet("permissions")]
-    [RequirePermission("Roles.Manage")]
+    [RequireAnyPermission("Roles.View", "Roles.Manage")]
     public async Task<IActionResult> GetPermissions(CancellationToken ct)
         => Ok(await _mediator.Send(new GetPermissionsQuery(), ct));
 

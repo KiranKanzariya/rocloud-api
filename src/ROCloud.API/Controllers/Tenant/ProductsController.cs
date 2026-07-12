@@ -24,14 +24,17 @@ public class ProductsController : ControllerBase
 
     public ProductsController(IMediator mediator) => _mediator = mediator;
 
+    // Order lines are made of products, so anyone who may view orders must be able to read the
+    // catalogue — otherwise a role like CustomerCare holds Orders.Create but gets an empty product
+    // dropdown and cannot place an order at all.
     [HttpGet]
-    [RequirePermission("Inventory.View")]
+    [RequireAnyPermission("Inventory.View", "Orders.View")]
     public async Task<IActionResult> GetProducts([FromQuery] bool includeInactive, CancellationToken ct)
         => Ok(ApiResponse<IReadOnlyList<ProductDto>>.Ok(
             await _mediator.Send(new GetProductsQuery(includeInactive), ct)));
 
     [HttpGet("{id:guid}")]
-    [RequirePermission("Inventory.View")]
+    [RequireAnyPermission("Inventory.View", "Orders.View")]
     public async Task<IActionResult> GetProduct(Guid id, CancellationToken ct)
         => Ok(ApiResponse<ProductDto>.Ok(await _mediator.Send(new GetProductByIdQuery(id), ct)));
 

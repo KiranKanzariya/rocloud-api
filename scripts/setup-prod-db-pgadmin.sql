@@ -108,20 +108,30 @@ INSERT INTO permissions (module, action, code) VALUES
   ('Payments', 'View', 'Payments.View'),
   ('Reports', 'View', 'Reports.View'),
   ('Roles', 'Manage', 'Roles.Manage'),
-  ('Settings', 'Manage', 'Settings.Manage'),
-  ('Settings', 'View', 'Settings.View'),
+  ('Roles', 'View', 'Roles.View'),
+  -- One View/Manage pair per settings PAGE. The tenant's own ROCloud subscription has no permission
+  -- at all — it is [RequireOwner], so no custom role can be granted the right to change the plan.
+  ('Areas', 'View', 'Areas.View'),
+  ('Areas', 'Manage', 'Areas.Manage'),
+  ('Notifications', 'View', 'Notifications.View'),
+  ('Notifications', 'Manage', 'Notifications.Manage'),
+  ('Business Profile', 'View', 'BusinessProfile.View'),
+  ('Business Profile', 'Manage', 'BusinessProfile.Manage'),
   ('Users', 'Manage', 'Users.Manage'),
   ('Users', 'View', 'Users.View')
 ON CONFLICT (code) DO NOTHING;
 
 -- Plans (only when the table is empty, so re-runs don't duplicate).
+-- max_customers / max_users / max_delivery_boys: 0 = unlimited (Plan.Unlimited).
+-- whatsapp_enabled, multi_branch_enabled, api_access_enabled are false on every plan:
+-- those features are not built yet and both portals render them as "coming soon".
 INSERT INTO plans (name, plan_type, monthly_price, yearly_price, max_customers, max_users,
                    max_delivery_boys, whatsapp_enabled, custom_roles_enabled, multi_branch_enabled,
                    api_access_enabled, is_active)
 SELECT * FROM (VALUES
   ('Basic',      'Basic',      1099.00,  9990.00, 200,  3, 1, false, false, false, false, true),
-  ('Pro',        'Pro',        2499.00, 24990.00, 1000, 10, 5, true,  false, false, false, true),
-  ('Enterprise', 'Enterprise', 5999.00, 59990.00, 0,   0, 0, true,  true,  true,  false, true)
+  ('Pro',        'Pro',        2499.00, 24990.00, 1000, 10, 5, false, false, false, false, true),
+  ('Enterprise', 'Enterprise', 5999.00, 59990.00, 0,   0, 0, false, true,  false, false, true)
 ) AS v(name, plan_type, monthly_price, yearly_price, max_customers, max_users,
        max_delivery_boys, whatsapp_enabled, custom_roles_enabled, multi_branch_enabled,
        api_access_enabled, is_active)

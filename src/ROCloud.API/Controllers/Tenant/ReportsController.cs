@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using ROCloud.API.Filters;
 using ROCloud.Application.Common.Interfaces;
 using ROCloud.Application.Common.Models;
+using ROCloud.Domain.Enums;
 
 namespace ROCloud.API.Controllers.Tenant;
 
@@ -14,7 +15,7 @@ namespace ROCloud.API.Controllers.Tenant;
 [ApiController]
 [Route("api/reports")]
 [Authorize]
-[RequirePlan("Pro")]
+[RequirePlan(PlanType.Pro)]
 [RequirePermission("Reports.View")]
 public class ReportsController : ControllerBase
 {

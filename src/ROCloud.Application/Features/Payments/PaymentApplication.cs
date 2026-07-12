@@ -11,12 +11,16 @@ internal static class PaymentApplication
 {
     public static void ApplyToInvoice(Invoice invoice, decimal amount)
     {
-        invoice.PaidAmount += amount;
-
         if (invoice.Status == InvoiceStatus.Cancelled)
-            return;   // never resurrect a cancelled invoice
+            return;   // never resurrect a cancelled invoice; the money stays in the customer's pool
 
-        invoice.Status = invoice.PaidAmount >= invoice.TotalAmount
+        // Never book more than the invoice still owes. The surplus is deliberately left unclaimed so
+        // CustomerObligationAllocator — whose pool is (payments − PaidAmount) — can spend it on the
+        // customer's other dues instead of it vanishing into an over-paid row.
+        var owed = Math.Max(0m, invoice.TotalAmount - invoice.PaidAmount);
+        invoice.PaidAmount += Math.Min(amount, owed);
+
+        invoice.Status = invoice.TotalAmount > 0m && invoice.PaidAmount >= invoice.TotalAmount
             ? InvoiceStatus.Paid
             : invoice.PaidAmount > 0
                 ? InvoiceStatus.PartiallyPaid

@@ -34,7 +34,7 @@ INSERT INTO public.plans VALUES ('8d73999a-8958-4c2f-b2d9-793b6cec0797', 'Enterp
 
 
 -- ────────────────────────────────────────────────────────────────────────────
--- 2. PERMISSIONS  (the full 28-permission catalog)
+-- 2. PERMISSIONS  (the full 33-permission catalog)
 -- ────────────────────────────────────────────────────────────────────────────
 INSERT INTO public.permissions VALUES ('52292ffc-c2e5-44cc-a31a-73c060f542b2', 'Customers', 'View', 'Customers.View') ON CONFLICT DO NOTHING;
 INSERT INTO public.permissions VALUES ('b52ebb02-027e-434a-b1f5-a4ce85d73d9b', 'Customers', 'Create', 'Customers.Create') ON CONFLICT DO NOTHING;
@@ -61,9 +61,17 @@ INSERT INTO public.permissions VALUES ('f6aad34e-8ec6-490b-b77e-0a90db2330a2', '
 INSERT INTO public.permissions VALUES ('040e6386-d251-4786-b9a9-5a71e864688e', 'AMC', 'Update', 'AMC.Update') ON CONFLICT DO NOTHING;
 INSERT INTO public.permissions VALUES ('6a3ae0c6-b0f0-4d95-b3a7-acd99013a5d0', 'Users', 'View', 'Users.View') ON CONFLICT DO NOTHING;
 INSERT INTO public.permissions VALUES ('a9185973-bcbb-4762-98b9-c05354c03f9d', 'Users', 'Manage', 'Users.Manage') ON CONFLICT DO NOTHING;
+INSERT INTO public.permissions VALUES ('2c1f7f4e-3a5d-4b8e-9c17-6d0a1b2e4c93', 'Roles', 'View', 'Roles.View') ON CONFLICT DO NOTHING;
 INSERT INTO public.permissions VALUES ('af1d36f9-a405-4572-8f91-b86ae190446b', 'Roles', 'Manage', 'Roles.Manage') ON CONFLICT DO NOTHING;
-INSERT INTO public.permissions VALUES ('07c752b3-7db4-47f0-88a7-db6b005b8da2', 'Settings', 'View', 'Settings.View') ON CONFLICT DO NOTHING;
-INSERT INTO public.permissions VALUES ('970ee181-851d-46ca-9a43-35b165b16b70', 'Settings', 'Manage', 'Settings.Manage') ON CONFLICT DO NOTHING;
+-- Settings is not one permission but one per PAGE (see migration-AddPageWiseSettingsPermissions.sql).
+-- The tenant's own ROCloud subscription has no permission at all: it is [RequireOwner], so that no
+-- custom role can ever be granted the right to change the plan or spend the owner's money.
+INSERT INTO public.permissions VALUES ('3f2b9c14-6d81-4a27-9e53-1c8f0b6a2d47', 'Areas', 'View', 'Areas.View') ON CONFLICT DO NOTHING;
+INSERT INTO public.permissions VALUES ('8a15e7d2-0c64-4b39-a7f8-52d9e3b06c1a', 'Areas', 'Manage', 'Areas.Manage') ON CONFLICT DO NOTHING;
+INSERT INTO public.permissions VALUES ('c94d63f8-27ba-4e15-8306-4f7a1e9d5b28', 'Notifications', 'View', 'Notifications.View') ON CONFLICT DO NOTHING;
+INSERT INTO public.permissions VALUES ('5e07a1b6-9f3d-4c82-b1e4-7036c8d4a9f5', 'Notifications', 'Manage', 'Notifications.Manage') ON CONFLICT DO NOTHING;
+INSERT INTO public.permissions VALUES ('b6c8f430-1e59-42d7-9a06-3d8b5f2c7e41', 'Business Profile', 'View', 'BusinessProfile.View') ON CONFLICT DO NOTHING;
+INSERT INTO public.permissions VALUES ('2d94a7e5-8b36-4f01-93c7-6a1e0d5b8c93', 'Business Profile', 'Manage', 'BusinessProfile.Manage') ON CONFLICT DO NOTHING;
 
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -76,7 +84,7 @@ WHERE NOT EXISTS (SELECT 1 FROM public.audit_settings);
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- 4. NOTIFICATION TEMPLATES  (system defaults, tenant_id = NULL, en/hi/gu)
---    27 rows total: 9 template/channel combos × 3 languages.
+--    39 rows total: 13 template/channel combos × 3 languages.
 --    Guarded with NOT EXISTS (the UNIQUE constraint treats NULL tenant_id as
 --    distinct, so ON CONFLICT would not fire). A tenant may later override any row.
 -- ────────────────────────────────────────────────────────────────────────────
@@ -210,6 +218,108 @@ WHERE NOT EXISTS (
 );
 
 
+-- 4e. Remaining platform → tenant-owner mail: welcome / welcome_google / password_reset /
+--     subscription_receipt. Each handler keeps its English text as a built-in fallback.
+--     password_reset carries an <a href="{{ResetUrl}}"> link — the reset page reads ?token=.
+INSERT INTO public.notification_templates
+    (id, tenant_id, template_code, language_code, channel, subject, body, created_at, updated_at)
+SELECT gen_random_uuid(), NULL, v.code, v.lang, v.channel, v.subject, v.body, now(), now()
+FROM (VALUES
+    ('welcome', 'en', 'Email',
+        'Welcome to ROCloud',
+        'Hello {{OwnerName}}, welcome to ROCloud!
+
+Your portal is ready at: {{LoginUrl}}
+Sign in there any time with this email address. Bookmark the link so you can find it again.
+
+Your free trial runs until {{TrialEndsAt}}.'),
+    ('welcome', 'hi', 'Email',
+        'ROCloud में आपका स्वागत है',
+        'नमस्ते {{OwnerName}}, ROCloud में आपका स्वागत है!
+
+आपका पोर्टल तैयार है: {{LoginUrl}}
+आप कभी भी इसी ईमेल पते से साइन इन कर सकते हैं। लिंक को बुकमार्क कर लें।
+
+आपका निःशुल्क ट्रायल {{TrialEndsAt}} तक चलेगा।'),
+    ('welcome', 'gu', 'Email',
+        'ROCloud માં આપનું સ્વાગત છે',
+        'નમસ્તે {{OwnerName}}, ROCloud માં આપનું સ્વાગત છે!
+
+તમારું પોર્ટલ તૈયાર છે: {{LoginUrl}}
+તમે કોઈપણ સમયે આ જ ઈમેલ સરનામાંથી સાઇન ઇન કરી શકો છો. લિંક બુકમાર્ક કરી લો.
+
+તમારું મફત ટ્રાયલ {{TrialEndsAt}} સુધી ચાલશે.'),
+
+    ('welcome_google', 'en', 'Email',
+        'Welcome to ROCloud',
+        'Hello {{OwnerName}}, welcome to ROCloud!
+
+Your portal is ready at: {{LoginUrl}}
+Sign in there any time with Google using this email address. Bookmark the link so you can find it again.
+
+Your free trial runs until {{TrialEndsAt}}.'),
+    ('welcome_google', 'hi', 'Email',
+        'ROCloud में आपका स्वागत है',
+        'नमस्ते {{OwnerName}}, ROCloud में आपका स्वागत है!
+
+आपका पोर्टल तैयार है: {{LoginUrl}}
+आप कभी भी Google से इसी ईमेल पते का उपयोग करके साइन इन कर सकते हैं। लिंक को बुकमार्क कर लें।
+
+आपका निःशुल्क ट्रायल {{TrialEndsAt}} तक चलेगा।'),
+    ('welcome_google', 'gu', 'Email',
+        'ROCloud માં આપનું સ્વાગત છે',
+        'નમસ્તે {{OwnerName}}, ROCloud માં આપનું સ્વાગત છે!
+
+તમારું પોર્ટલ તૈયાર છે: {{LoginUrl}}
+તમે કોઈપણ સમયે Google વડે આ જ ઈમેલ સરનામાંનો ઉપયોગ કરીને સાઇન ઇન કરી શકો છો. લિંક બુકમાર્ક કરી લો.
+
+તમારું મફત ટ્રાયલ {{TrialEndsAt}} સુધી ચાલશે.'),
+
+    ('password_reset', 'en', 'Email',
+        'Reset your ROCloud password',
+        'Hi {{Name}}, we received a request to reset the password for your ROCloud account.
+
+<a href="{{ResetUrl}}">Reset your password</a>
+
+This link is valid for {{Minutes}} minutes and can be used once.
+
+If you didn''t request this, you can safely ignore this email — your password will not change.'),
+    ('password_reset', 'hi', 'Email',
+        'अपना ROCloud पासवर्ड रीसेट करें',
+        'नमस्ते {{Name}}, हमें आपके ROCloud खाते का पासवर्ड रीसेट करने का अनुरोध मिला है।
+
+<a href="{{ResetUrl}}">पासवर्ड रीसेट करें</a>
+
+यह लिंक {{Minutes}} मिनट के लिए मान्य है और केवल एक बार उपयोग किया जा सकता है।
+
+यदि आपने यह अनुरोध नहीं किया है, तो इस ईमेल को अनदेखा करें — आपका पासवर्ड नहीं बदलेगा।'),
+    ('password_reset', 'gu', 'Email',
+        'તમારો ROCloud પાસવર્ડ રીસેટ કરો',
+        'નમસ્તે {{Name}}, અમને તમારા ROCloud ખાતાનો પાસવર્ડ રીસેટ કરવાની વિનંતી મળી છે.
+
+<a href="{{ResetUrl}}">પાસવર્ડ રીસેટ કરો</a>
+
+આ લિંક {{Minutes}} મિનિટ માટે માન્ય છે અને એક જ વાર વાપરી શકાય છે.
+
+જો તમે આ વિનંતી કરી ન હોય, તો આ ઈમેલ અવગણો — તમારો પાસવર્ડ બદલાશે નહીં.'),
+
+    ('subscription_receipt', 'en', 'Email',
+        'Payment received — ROCloud invoice {{InvoiceNumber}}',
+        'Hi {{TenantName}}, we''ve received your payment of ₹{{Amount}} for invoice {{InvoiceNumber}}. Your ROCloud subscription is active. Thank you!'),
+    ('subscription_receipt', 'hi', 'Email',
+        'भुगतान प्राप्त हुआ — ROCloud इनवॉइस {{InvoiceNumber}}',
+        'नमस्ते {{TenantName}}, हमें इनवॉइस {{InvoiceNumber}} के लिए आपका ₹{{Amount}} का भुगतान प्राप्त हो गया है। आपकी ROCloud सदस्यता सक्रिय है। धन्यवाद!'),
+    ('subscription_receipt', 'gu', 'Email',
+        'ચુકવણી પ્રાપ્ત થઈ — ROCloud ઇન્વોઇસ {{InvoiceNumber}}',
+        'નમસ્તે {{TenantName}}, અમને ઇન્વોઇસ {{InvoiceNumber}} માટે તમારી ₹{{Amount}} ની ચુકવણી પ્રાપ્ત થઈ છે. તમારું ROCloud સબ્સ્ક્રિપ્શન સક્રિય છે. આભાર!')
+) AS v(code, lang, channel, subject, body)
+WHERE NOT EXISTS (
+    SELECT 1 FROM public.notification_templates t
+    WHERE t.tenant_id IS NULL AND t.template_code = v.code
+      AND t.language_code = v.lang AND t.channel = v.channel
+);
+
+
 -- ────────────────────────────────────────────────────────────────────────────
 -- 5. VERIFY  (expected counts after running)
 -- ────────────────────────────────────────────────────────────────────────────
@@ -218,6 +328,6 @@ WHERE NOT EXISTS (
 SELECT 'plans'                  AS table, count(*) AS rows, 3  AS expected FROM public.plans
 UNION ALL SELECT 'permissions',            count(*), 28 FROM public.permissions
 UNION ALL SELECT 'audit_settings',         count(*), 1  FROM public.audit_settings
-UNION ALL SELECT 'notification_templates (system default)', count(*), 27
+UNION ALL SELECT 'notification_templates (system default)', count(*), 39
           FROM public.notification_templates WHERE tenant_id IS NULL
 ORDER BY 1;

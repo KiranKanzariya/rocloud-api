@@ -10,22 +10,22 @@ namespace ROCloud.API.Filters;
 [AttributeUsage(AttributeTargets.Method | AttributeTargets.Class)]
 public class RequirePermissionAttribute : Attribute, IAsyncActionFilter
 {
-    private readonly string _permission;
+    public string Permission { get; }
 
-    public RequirePermissionAttribute(string permission) => _permission = permission;
+    public RequirePermissionAttribute(string permission) => Permission = permission;
 
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
         var permissions = context.HttpContext.User.FindFirst("permissions")?.Value?.Split(',')
                           ?? [];
 
-        if (!permissions.Contains(_permission))
+        if (!permissions.Contains(Permission))
         {
             context.Result = new ObjectResult(new
             {
                 error = "Forbidden",
                 code = "PERMISSION_DENIED",
-                detail = $"Required: {_permission}"
+                detail = $"Required: {Permission}"
             })
             { StatusCode = StatusCodes.Status403Forbidden };
             return;
