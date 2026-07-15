@@ -42,7 +42,8 @@ public class DeliveryTests
     private static readonly string[] DeliveryBoyPerms = ["Deliveries.ViewOwn", "Deliveries.Update"];
 
     private static async Task<(Order Order, Delivery Delivery)> SeedOrderWithDeliveryAsync(
-        AppDbContext db, Guid? deliveryBoyId = null, DeliveryStatus status = DeliveryStatus.Pending)
+        AppDbContext db, Guid? deliveryBoyId = null, DeliveryStatus status = DeliveryStatus.Pending,
+        DeliveryMode deliveryMode = DeliveryMode.HomeDelivery)
     {
         var customerId = Guid.NewGuid();
         db.Customers.Add(new Customer { Id = customerId, TenantId = TenantA, Name = "Cust", Mobile = "9" });
@@ -50,6 +51,7 @@ public class DeliveryTests
         {
             Id = Guid.NewGuid(), TenantId = TenantA, CustomerId = customerId,
             OrderDate = DateOnly.FromDateTime(DateTime.UtcNow), Status = OrderStatus.Pending,
+            DeliveryMode = deliveryMode,
             DeliveryBoyId = deliveryBoyId
         };
         var delivery = new Delivery
@@ -213,5 +215,97 @@ public class DeliveryTests
         Assert.Single(board.Pending);
         Assert.Single(board.InTransit);
         Assert.Equal(2, board.Delivered.Count);
+    }
+
+    [Fact]
+    public async Task GetBoard_Pickups_ListAwaitingPickupBeforeCompletedAndFailed()
+    {
+        var (db, _) = NewDb();
+        // Seed out of order on purpose — delivered/failed first, awaiting last.
+        await SeedOrderWithDeliveryAsync(db, status: DeliveryStatus.Delivered, deliveryMode: DeliveryMode.PlantPickup);
+        await SeedOrderWithDeliveryAsync(db, status: DeliveryStatus.Failed, deliveryMode: DeliveryMode.PlantPickup);
+        await SeedOrderWithDeliveryAsync(db, status: DeliveryStatus.Pending, deliveryMode: DeliveryMode.PlantPickup);
+
+        var handler = new GetDeliveryBoardQueryHandler(db);
+        var board = await handler.Handle(new GetDeliveryBoardQuery(new DeliveryFilterDto()), CancellationToken.None);
+
+        // Awaiting pickup (Pending) is what still needs action, so it must surface first.
+        Assert.Equal(3, board.Pickups.Count);
+        Assert.Equal(nameof(DeliveryStatus.Pending), board.Pickups[0].Status);
+        Assert.Equal(nameof(DeliveryStatus.Failed), board.Pickups[^1].Status);
+
+        // Pickups stay out of the home-delivery route columns entirely.
+        Assert.Empty(board.Pending);
+        Assert.Empty(board.Delivered);
+    }
+
+    [Fact]
+    public async Task GetDeliveryProductTotals_SumsTodaysDeliveriesByProduct()
+    {
+        var (db, _) = NewDb();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var p20 = Guid.NewGuid();
+        var p18 = Guid.NewGuid();
+        db.Products.Add(new Product { Id = p20, TenantId = TenantA, Name = "20L Jar", BottleSize = BottleSize.TwentyL });
+        db.Products.Add(new Product { Id = p18, TenantId = TenantA, Name = "18L Jar", BottleSize = BottleSize.EighteenL });
+
+        async Task Stop(DateOnly day, Guid productId, int qty)
+        {
+            var customerId = Guid.NewGuid();
+            db.Customers.Add(new Customer { Id = customerId, TenantId = TenantA, Name = "C", Mobile = "9" });
+            var orderId = Guid.NewGuid();
+            db.Orders.Add(new Order { Id = orderId, TenantId = TenantA, CustomerId = customerId, OrderDate = day, Status = OrderStatus.Pending });
+            db.OrderItems.Add(new OrderItem { Id = Guid.NewGuid(), TenantId = TenantA, OrderId = orderId, ProductId = productId, Quantity = qty, UnitRate = 40m });
+            db.Deliveries.Add(new Delivery { Id = Guid.NewGuid(), TenantId = TenantA, OrderId = orderId, ScheduledDate = day, Status = DeliveryStatus.Pending });
+            await db.SaveChangesAsync();
+        }
+        await Stop(today, p20, 3);
+        await Stop(today, p20, 2);   // 20L today totals 5
+        await Stop(today, p18, 1);   // 18L today totals 1
+        await Stop(today.AddDays(-1), p20, 9);   // yesterday — must be excluded
+
+        var handler = new Application.Features.Deliveries.Queries.GetDeliveryProductTotals.GetDeliveryProductTotalsQueryHandler(db);
+        var totals = await handler.Handle(
+            new Application.Features.Deliveries.Queries.GetDeliveryProductTotals.GetDeliveryProductTotalsQuery(
+                new DeliveryFilterDto { Date = today }),
+            CancellationToken.None);
+
+        Assert.Equal(2, totals.Count);
+        Assert.Equal("20L Jar", totals[0].ProductName);   // ordered by quantity desc
+        Assert.Equal(5, totals[0].Quantity);              // 3 + 2, yesterday's 9 excluded
+        Assert.Equal("18L Jar", totals[1].ProductName);
+        Assert.Equal(1, totals[1].Quantity);
+    }
+
+    [Fact]
+    public async Task GetDeliveryDetail_OtherEmpties_ResolveProductNameAndSize()
+    {
+        // An empty of a DIFFERENT size returned during a delivery is recorded as a Return movement for
+        // a product NOT on the order. Its name/size must still resolve — else the row renders as "()".
+        var (db, _) = NewDb();
+        var (_, delivery) = await SeedOrderWithDeliveryAsync(db, status: DeliveryStatus.Delivered);
+
+        // A product that is NOT on the order (the "other empty").
+        var otherProductId = Guid.NewGuid();
+        db.Products.Add(new Product
+        {
+            Id = otherProductId, TenantId = TenantA, Name = "18L Jar", BottleSize = BottleSize.EighteenL
+        });
+        db.InventoryMovements.Add(new InventoryMovement
+        {
+            Id = Guid.NewGuid(), TenantId = TenantA, ProductId = otherProductId,
+            OrderId = delivery.OrderId, MovementType = InventoryMovementType.Return, Quantity = 2
+        });
+        await db.SaveChangesAsync();
+
+        var handler = new Application.Features.Deliveries.Queries.GetDeliveryDetail.GetDeliveryDetailQueryHandler(db);
+        var detail = await handler.Handle(
+            new Application.Features.Deliveries.Queries.GetDeliveryDetail.GetDeliveryDetailQuery(delivery.Id),
+            CancellationToken.None);
+
+        var other = Assert.Single(detail.OtherReturns);
+        Assert.Equal("18L Jar", other.ProductName);   // was blank before the fix
+        Assert.Equal("18L", other.BottleSize);
+        Assert.Equal(2, other.Quantity);
     }
 }

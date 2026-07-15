@@ -105,6 +105,10 @@ public class SetCustomerOpeningBalanceCommandHandler : IRequestHandler<SetCustom
             AddAdvancePayment(customer.Id, -request.OpeningDues, request.CutoverDate, note);
 
         await _db.SaveChangesAsync(ct);
+
+        // An imported advance must immediately settle the customer's oldest dues; an opening invoice
+        // must be settled by any advance they already hold. Either way the invoices need re-stating.
+        await Payments.InvoiceAllocationSync.SyncAsync(_db, customer.Id, ct);
     }
 
     /// <summary>An opening balance is a one-time seed; block a second run (clear it first to redo).</summary>

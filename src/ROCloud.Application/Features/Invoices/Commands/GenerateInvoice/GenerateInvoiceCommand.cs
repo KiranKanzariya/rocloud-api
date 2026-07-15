@@ -110,6 +110,9 @@ public class GenerateInvoiceCommandHandler : IRequestHandler<GenerateInvoiceComm
             _db, invoice, customer.Id, request.PeriodFrom, request.PeriodTo, ct);
 
         await _db.SaveChangesAsync(ct);
+
+        // A brand-new invoice may already be covered by an advance the customer is holding.
+        await Payments.InvoiceAllocationSync.SyncAsync(_db, customer.Id, ct);
         return invoice.Id;
     }
 

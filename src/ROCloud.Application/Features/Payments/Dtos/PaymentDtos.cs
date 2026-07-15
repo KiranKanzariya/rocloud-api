@@ -19,6 +19,8 @@ public sealed record PaymentListItemDto(
 public sealed record PaymentFilterDto
 {
     public Guid? CustomerId { get; init; }
+    /// <summary>Payments booked against one invoice — lets the invoice page ask for its OWN receipts.</summary>
+    public Guid? InvoiceId { get; init; }
     public string? PaymentMethod { get; init; }
     public string? Status { get; init; }
     public DateOnly? FromDate { get; init; }
@@ -26,6 +28,18 @@ public sealed record PaymentFilterDto
     public int Page { get; init; } = 1;
     public int PageSize { get; init; } = 25;
 }
+
+/// <summary>
+/// Collection totals for a date window, summed in SQL over EVERY matching payment — never over a
+/// fetched page, which would silently under-report as soon as the window exceeds one page.
+/// Completed payments only.
+/// </summary>
+public sealed record PaymentSummaryDto(
+    decimal Collected,
+    int Count,
+    decimal Cash,
+    decimal Upi,
+    decimal Other);
 
 /// <summary>A customer with overdue unpaid invoices (older than the threshold).</summary>
 public sealed record OutstandingDueDto(

@@ -36,40 +36,28 @@ public class GetInvoicesQueryHandler : IRequestHandler<GetInvoicesQuery, PagedRe
 
         var total = await query.CountAsync(ct);
 
-        var rows = await query
+        // PaidAmount and Status are maintained on write by InvoiceAllocationSync — they already account
+        // for payments the owner recorded against the customer rather than the invoice. So the rows can
+        // be read straight from the database, and the Status filter above (which runs in SQL) agrees
+        // with what is rendered. While the status was DERIVED here, it could not: filtering by Sent
+        // returned invoices that displayed as Paid, and filtering by Paid missed settled ones.
+        var items = await query
             .OrderByDescending(i => i.InvoiceDate).ThenByDescending(i => i.InvoiceNumber)
             .Skip((page - 1) * pageSize).Take(pageSize)
-            .Select(i => new
-            {
+            .Select(i => new InvoiceListItemDto(
                 i.Id,
                 i.InvoiceNumber,
                 i.CustomerId,
-                CustomerName = i.Customer != null ? i.Customer.Name : string.Empty,
+                i.Customer != null ? i.Customer.Name : string.Empty,
                 i.InvoiceDate,
                 i.DueDate,
                 i.TotalAmount,
                 i.PaidAmount,
-                i.Status,
+                i.TotalAmount - i.PaidAmount,
+                i.Status.ToString(),
                 i.Discount,
-                i.CreatedAt
-            })
+                i.CreatedAt))
             .ToListAsync(ct);
-
-        // Top up each row with its share of the customer's unallocated payment pool, so an invoice the
-        // owner settled with a lump sum on the customer page doesn't read "Sent" for ever. NOTE: the
-        // Status FILTER above runs on the RECORDED status in SQL, so a row can be filtered as Sent and
-        // then render as Paid — the money is right, the filter is just coarse.
-        var allocations = (await CustomerObligationAllocator.ComputeAsync(
-            _db, rows.Select(r => r.CustomerId).Distinct().ToList(), ct)).Invoices;
-
-        var items = rows.Select(r =>
-        {
-            var (paid, balance, status) = InvoicePaymentStatus.Resolve(
-                r.Status, r.TotalAmount, r.PaidAmount, allocations.GetValueOrDefault(r.Id, 0m));
-            return new InvoiceListItemDto(
-                r.Id, r.InvoiceNumber, r.CustomerId, r.CustomerName, r.InvoiceDate, r.DueDate,
-                r.TotalAmount, paid, balance, status.ToString(), r.Discount, r.CreatedAt);
-        }).ToList();
 
         return new PagedResult<InvoiceListItemDto>(items, total, page, pageSize);
     }

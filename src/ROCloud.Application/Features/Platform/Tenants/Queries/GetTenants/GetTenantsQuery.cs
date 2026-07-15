@@ -43,7 +43,8 @@ public class GetTenantsQueryHandler : IRequestHandler<GetTenantsQuery, PagedResu
         var size = Math.Clamp(f.PageSize, 1, 100);
 
         var rows = await query
-            .OrderByDescending(t => t.CreatedAt)
+            // Id tiebreaker keeps paging deterministic when tenants share a CreatedAt.
+            .OrderByDescending(t => t.CreatedAt).ThenByDescending(t => t.Id)
             .Skip((page - 1) * size).Take(size)
             .Select(t => new
             {
@@ -56,11 +57,22 @@ public class GetTenantsQueryHandler : IRequestHandler<GetTenantsQuery, PagedResu
         // Postgres row-level-security policy, so a cross-tenant batch count returns 0 for platform
         // requests (no tenant context). Scope the connection to each tenant — as GetTenantById does —
         // and count individually. The page size is bounded (≤100), so this stays a small fan-out.
+        // Restore the ambient context afterwards. ITenantContext is request-scoped, so leaving it set
+        // to the LAST tenant on the page would silently re-scope anything that ran later in the same
+        // request — a platform request must not end up impersonating an arbitrary tenant.
+        var originalTenantId = _tenant.TenantId;
         var counts = new Dictionary<Guid, int>();
-        foreach (var r in rows)
+        try
         {
-            _tenant.TenantId = r.Id;
-            counts[r.Id] = await _db.Customers.CountAsync(c => c.TenantId == r.Id && !c.IsDeleted, ct);
+            foreach (var r in rows)
+            {
+                _tenant.TenantId = r.Id;
+                counts[r.Id] = await _db.Customers.CountAsync(c => c.TenantId == r.Id && !c.IsDeleted, ct);
+            }
+        }
+        finally
+        {
+            _tenant.TenantId = originalTenantId;
         }
 
         var items = rows.Select(r => new TenantListItemDto(

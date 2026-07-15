@@ -30,7 +30,7 @@ public class GetSubscriptionInvoicesQueryHandler
             .Select(i => new SubscriptionInvoiceDto(
                 i.Id, i.InvoiceNumber, i.PlanType, i.BillingCycle,
                 i.PeriodStart, i.PeriodEnd, i.GrossAmount, i.DiscountAmount, i.Amount,
-                i.Status, i.DueDate, i.Description, i.PaidAt, i.PdfUrl != null))
+                i.Status, i.DueDate, i.Description, i.PaidAt))
             .ToListAsync(ct);
     }
 }

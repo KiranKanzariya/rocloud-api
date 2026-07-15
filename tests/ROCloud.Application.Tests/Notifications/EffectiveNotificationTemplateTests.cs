@@ -1,6 +1,9 @@
+using FluentValidation.TestHelper;
 using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Exceptions;
+using ROCloud.Application.Features.NotificationTemplates;
 using ROCloud.Application.Features.NotificationTemplates.Commands.DeleteNotificationTemplate;
+using ROCloud.Application.Features.NotificationTemplates.Commands.UpsertNotificationTemplate;
 using ROCloud.Application.Features.NotificationTemplates.Queries.GetNotificationTemplates;
 using ROCloud.Domain.Entities.Tenant;
 using ROCloud.Infrastructure.MultiTenancy;
@@ -56,11 +59,19 @@ public class EffectiveNotificationTemplateTests
         Assert.True(row.IsCustom);
     }
 
-    [Fact]
-    public async Task PlatformOnlyTemplate_IsHiddenFromTenant()
+    [Theory]
+    [InlineData("welcome")]
+    [InlineData("welcome_google")]
+    [InlineData("password_reset")]
+    [InlineData("subscription_expiry")]
+    [InlineData("subscription_invoice")]
+    [InlineData("subscription_receipt")]
+    public async Task PlatformOnlyTemplate_IsHiddenFromTenant(string platformCode)
     {
+        // ROCloud sends these to the owner, not the owner to their customers. They render with a null
+        // tenant id, so an override is never read — showing them would promise an edit that does nothing.
         var (db, ctx) = NewDb();
-        db.NotificationTemplates.Add(Row(null, "subscription_expiry", "Renew soon"));
+        db.NotificationTemplates.Add(Row(null, platformCode, "Sent by ROCloud"));
         db.NotificationTemplates.Add(Row(null, "invoice_sent", "Invoice"));
         await db.SaveChangesAsync();
 
@@ -69,6 +80,47 @@ public class EffectiveNotificationTemplateTests
 
         Assert.Single(result);
         Assert.Equal("invoice_sent", result[0].TemplateCode);
+    }
+
+    [Fact]
+    public async Task OnlyCustomerFacingTemplates_SurviveTheFilter()
+    {
+        var (db, ctx) = NewDb();
+        foreach (var code in PlatformTemplates.Codes)
+            db.NotificationTemplates.Add(Row(null, code, "Sent by ROCloud"));
+        foreach (var code in new[] { "invoice_sent", "payment_reminder", "amc_reminder", "advance_order_reminder" })
+            db.NotificationTemplates.Add(Row(null, code, "Sent by the business"));
+        await db.SaveChangesAsync();
+
+        var result = await new GetNotificationTemplatesQueryHandler(db, ctx)
+            .Handle(new GetNotificationTemplatesQuery(), CancellationToken.None);
+
+        Assert.Equal(
+            ["advance_order_reminder", "amc_reminder", "invoice_sent", "payment_reminder"],
+            result.Select(r => r.TemplateCode).OrderBy(c => c));
+    }
+
+    [Theory]
+    [InlineData("welcome")]
+    [InlineData("password_reset")]
+    [InlineData("subscription_receipt")]
+    public void SavingAnOverrideForAPlatformTemplate_IsRejected(string platformCode)
+    {
+        // Hiding it from the list is not enough: a hand-made request would otherwise store a row the
+        // owner believes is live, when the send path would never look at it.
+        var result = new UpsertNotificationTemplateCommandValidator().TestValidate(
+            new UpsertNotificationTemplateCommand(platformCode, "en", "Email", "Subject", "Body"));
+
+        result.ShouldHaveValidationErrorFor(c => c.TemplateCode);
+    }
+
+    [Fact]
+    public void SavingAnOverrideForACustomerTemplate_IsAllowed()
+    {
+        var result = new UpsertNotificationTemplateCommandValidator().TestValidate(
+            new UpsertNotificationTemplateCommand("invoice_sent", "en", "Email", "Subject", "Body"));
+
+        result.ShouldNotHaveValidationErrorFor(c => c.TemplateCode);
     }
 
     [Fact]

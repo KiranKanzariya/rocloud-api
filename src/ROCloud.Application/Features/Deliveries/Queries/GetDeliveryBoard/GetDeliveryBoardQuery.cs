@@ -28,9 +28,22 @@ public class GetDeliveryBoardQueryHandler : IRequestHandler<GetDeliveryBoardQuer
             .ToListItem(_db)
             .ToListAsync(ct);
 
+        // Off-order empties (product not on the order) for the delivered stops, filled in after the
+        // SQL projection since it needs an in-memory group.
+        var otherReturns = await OrderOtherReturns.ComputeAsync(
+            _db, all.Where(d => d.Status == nameof(DeliveryStatus.Delivered)).Select(d => d.OrderId).ToList(), ct);
+        foreach (var d in all)
+            if (otherReturns.TryGetValue(d.OrderId, out var lines))
+                d.OtherReturns = lines.Select(l => new DeliveredOtherReturnDto(l.ProductName, l.Quantity)).ToList();
+
         // Plant-pickup stops have no route/van leg — pull them into their own section so the status
-        // columns (and the van-load total below) reflect home deliveries only.
-        var pickups = all.Where(d => d.DeliveryMode == nameof(DeliveryMode.PlantPickup)).ToList();
+        // columns (and the van-load total below) reflect home deliveries only. Awaiting-pickup stops
+        // come first (they're the ones still needing action); completed/failed sink below. Within a
+        // group the scheduled-date order from above is preserved.
+        var pickups = all
+            .Where(d => d.DeliveryMode == nameof(DeliveryMode.PlantPickup))
+            .OrderBy(d => PickupOrder(d.Status))
+            .ToList();
         var route = all.Where(d => d.DeliveryMode != nameof(DeliveryMode.PlantPickup)).ToList();
 
         var pending = route.Where(d => d.Status == nameof(DeliveryStatus.Pending)).ToList();
@@ -48,6 +61,16 @@ public class GetDeliveryBoardQueryHandler : IRequestHandler<GetDeliveryBoardQuer
 
         return new DeliveryBoardDto(pending, inTransit, delivered, failed, pickups, toDeliver);
     }
+
+    /// <summary>Sort key for the pickups section: awaiting-pickup first, then done, then failed.</summary>
+    private static int PickupOrder(string status) => status switch
+    {
+        nameof(DeliveryStatus.Pending) => 0,
+        nameof(DeliveryStatus.InTransit) => 0,   // an in-progress pickup is still "awaiting", show up top
+        nameof(DeliveryStatus.Delivered) => 1,
+        nameof(DeliveryStatus.Skipped) => 1,
+        _ => 2                                    // Failed (and anything else) last
+    };
 
     /// <summary>Sums order-item quantities by product across the given (outstanding) orders.</summary>
     private async Task<IReadOnlyList<BoardItemTotalDto>> BuildToDeliverAsync(

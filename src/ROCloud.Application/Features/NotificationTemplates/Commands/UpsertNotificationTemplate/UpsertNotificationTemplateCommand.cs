@@ -25,6 +25,13 @@ public class UpsertNotificationTemplateCommandValidator : AbstractValidator<Upse
     public UpsertNotificationTemplateCommandValidator()
     {
         RuleFor(c => c.TemplateCode).NotEmpty().MaximumLength(50);
+
+        // A platform→tenant mail (welcome, password_reset, subscription_*) is rendered with a null
+        // tenant id, so an override for it would never be read. Refuse it rather than store a row the
+        // owner believes is live. These are hidden from the list too; this stops a hand-made request.
+        RuleFor(c => c.TemplateCode)
+            .Must(code => !PlatformTemplates.IsPlatformOnly(code))
+            .WithMessage("This template is sent by ROCloud, not by your business, and cannot be customised.");
         RuleFor(c => c.LanguageCode).NotEmpty().MaximumLength(5);
         RuleFor(c => c.Channel)
             .Must(v => Channels.Contains(v))

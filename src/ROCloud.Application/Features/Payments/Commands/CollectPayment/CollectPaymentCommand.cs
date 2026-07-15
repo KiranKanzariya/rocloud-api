@@ -93,6 +93,10 @@ public class CollectPaymentCommandHandler : IRequestHandler<CollectPaymentComman
 
         await _db.SaveChangesAsync(ct);
 
+        // Spread whatever is not booked against an invoice over the customer's oldest dues, and write
+        // the result down — so the invoice list, its status filter, and the reminders all agree.
+        await InvoiceAllocationSync.SyncAsync(_db, customer.Id, ct);
+
         // Audit trail: the payment row itself is the record; structured audit lands in Phase 15.
         _logger.LogInformation(
             "Payment {PaymentId} of {Amount} collected for customer {CustomerId} by {UserId}",

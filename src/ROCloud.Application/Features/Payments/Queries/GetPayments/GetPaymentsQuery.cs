@@ -25,6 +25,7 @@ public class GetPaymentsQueryHandler : IRequestHandler<GetPaymentsQuery, PagedRe
         IQueryable<Payment> query = _db.Payments;
 
         if (f.CustomerId is { } customerId) query = query.Where(p => p.CustomerId == customerId);
+        if (f.InvoiceId is { } invoiceId) query = query.Where(p => p.InvoiceId == invoiceId);
         if (f.PaymentMethod is not null && Enum.GetNames<PaymentMethod>().Contains(f.PaymentMethod))
         {
             var method = Enum.Parse<PaymentMethod>(f.PaymentMethod);

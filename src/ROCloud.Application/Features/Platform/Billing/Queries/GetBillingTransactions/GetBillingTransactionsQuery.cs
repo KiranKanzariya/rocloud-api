@@ -37,7 +37,8 @@ public class GetBillingTransactionsQueryHandler : IRequestHandler<GetBillingTran
         var size = Math.Clamp(f.PageSize, 1, 100);
 
         var rows = await query
-            .OrderByDescending(t => t.CreatedAt)
+            // Id tiebreaker keeps paging deterministic when transactions share a CreatedAt.
+            .OrderByDescending(t => t.CreatedAt).ThenByDescending(t => t.Id)
             .Skip((page - 1) * size).Take(size)
             .Select(t => new BillingTransactionDto(
                 t.Id, t.TenantId, t.Tenant!.Name, t.PlanType, t.Amount, t.BillingCycle,

@@ -31,7 +31,8 @@ public class GetSupportTicketsQueryHandler
         var size = Math.Clamp(f.PageSize, 1, 100);
 
         var rows = await query
-            .OrderByDescending(t => t.CreatedAt)
+            // Id tiebreaker keeps paging deterministic when tickets share a CreatedAt.
+            .OrderByDescending(t => t.CreatedAt).ThenByDescending(t => t.Id)
             .Skip((page - 1) * size).Take(size)
             .Select(t => new SupportTicketListItemDto(
                 t.Id, t.TenantId, t.Tenant!.Name, t.Subject, t.Status, t.Priority,

@@ -63,7 +63,7 @@ public class InvoicesController : ControllerBase
     public async Task<IActionResult> Send(Guid id, CancellationToken ct)
     {
         var result = await _mediator.Send(new SendInvoiceCommand(id), ct);
-        return Ok(ApiResponse<object>.Ok(new { id, pdfUrl = result.PdfPath, emailed = result.Emailed }));
+        return Ok(ApiResponse<object>.Ok(new { id, emailed = result.Emailed }));
     }
 }
 

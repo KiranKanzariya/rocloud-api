@@ -17,7 +17,20 @@ public sealed record OrderListItemDto(
     decimal AmountPaid,
     string PaymentStatus,
     // When the order was recorded — lets the UI tell apart multiple orders placed on the same OrderDate.
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    // The ordered lines (product + qty) so a list can show WHAT was ordered, not just a count.
+    IReadOnlyList<OrderLineSummaryDto> Lines,
+    // Per-product jars out/back once delivered — so the owner can track bottles from the list itself.
+    // Empty until delivered (and for older single-count deliveries, which have no per-item rows).
+    IReadOnlyList<OrderDeliveredLineDto> DeliveredLines,
+    // Off-order empties returned on this order's delivery (product not on the order).
+    IReadOnlyList<OrderDeliveredOtherReturnDto> OtherReturns);
+
+/// <summary>A delivered line on an order row: product name + jars out / back.</summary>
+public sealed record OrderDeliveredLineDto(string ProductName, int JarsDelivered, int JarsReturned);
+
+/// <summary>An off-order empty returned, on an order row: product name + how many.</summary>
+public sealed record OrderDeliveredOtherReturnDto(string ProductName, int Quantity);
 
 /// <summary>Full order for the detail view, with items and the linked delivery.</summary>
 public sealed record OrderDto(
@@ -54,7 +67,18 @@ public sealed record OrderDeliveryDto(
     int? JarsReturned,
     decimal? CollectedAmount,
     string? PaymentMethod,
-    string? ProofImageUrl);
+    string? ProofImageUrl,
+    // Per-product out/back, so the owner sees WHICH jar went out and came back — not just the totals.
+    IReadOnlyList<OrderDeliveryItemDto> Items,
+    // Empties returned for a product NOT on this order (e.g. a 20L on an 18L run).
+    IReadOnlyList<OrderOtherReturnDto> OtherReturns);
+
+/// <summary>One product's jars handed over / brought back on the order's delivery.</summary>
+public sealed record OrderDeliveryItemDto(
+    string ProductName, string BottleSize, int JarsDelivered, int JarsReturned);
+
+/// <summary>An off-order empty returned on the delivery: product + how many came back.</summary>
+public sealed record OrderOtherReturnDto(string ProductName, string BottleSize, int Quantity);
 
 /// <summary>A line item on a create-order request (enum-free; product drives the rate).</summary>
 public sealed record CreateOrderItemDto(Guid ProductId, int Quantity, decimal? UnitRate);

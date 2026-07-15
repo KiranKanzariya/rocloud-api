@@ -69,6 +69,7 @@ public static class DependencyInjection
         services.AddScoped<BackgroundJobs.DailyDeliveryRolloverJob>();
         services.AddScoped<BackgroundJobs.SubscriptionExpiryJob>();
         services.AddScoped<BackgroundJobs.PaymentReminderJob>();
+        services.AddScoped<BackgroundJobs.InvoiceAllocationSyncJob>();
         services.AddScoped<BackgroundJobs.AmcReminderJob>();
         services.AddScoped<BackgroundJobs.AdvanceOrderReminderJob>();
         services.AddScoped<BackgroundJobs.AuditLogPartitionJob>();
@@ -121,9 +122,13 @@ public static class DependencyInjection
             TimeSpan.FromMinutes(cacheExpiryMinutes)));
 
         // File storage — local disk (v1), behind IFileStorage (guide §4b). Swap to S3/Supabase later.
+        // Used for delivery-proof photos only; invoice PDFs are never stored (rendered on demand).
         services.AddHttpContextAccessor();
         services.AddDataProtection();
         services.AddScoped<IFileStorage, LocalFileStorage>();
+
+        // Signs the expiring invoice-download links emailed to customers (they have no login).
+        services.AddScoped<IInvoiceLinkSigner, Security.InvoiceLinkSigner>();
 
         // Delivery proof photos — validation + re-encode pipeline (guide §10.11).
         services.AddScoped<

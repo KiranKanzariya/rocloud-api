@@ -229,4 +229,166 @@ public class OrderTests
         Assert.Equal(30, day.Lines[1].TotalQuantity);
         Assert.Equal(3, day.Bookings.Count);
     }
+
+    [Fact]
+    public async Task GetOrders_CarriesOrderedLines_AndDeliveredOutBack()
+    {
+        var (db, _) = NewDb();
+        var (customerId, productId, _, _) = await SeedAsync(db);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        // A pending order — the list should show WHAT was ordered.
+        var pendingId = Guid.NewGuid();
+        db.Orders.Add(new Order
+        {
+            Id = pendingId, TenantId = TenantA, CustomerId = customerId,
+            OrderDate = today, Status = OrderStatus.Confirmed, CreatedAt = DateTime.UtcNow.AddMinutes(-1)
+        });
+        db.OrderItems.Add(new OrderItem
+        {
+            Id = Guid.NewGuid(), TenantId = TenantA, OrderId = pendingId,
+            ProductId = productId, Quantity = 3, UnitRate = 40m
+        });
+
+        // A delivered order with a per-item delivery record — the list should show out/back.
+        var deliveredId = Guid.NewGuid();
+        db.Orders.Add(new Order
+        {
+            Id = deliveredId, TenantId = TenantA, CustomerId = customerId,
+            OrderDate = today, Status = OrderStatus.Delivered, CreatedAt = DateTime.UtcNow
+        });
+        var oiId = Guid.NewGuid();
+        db.OrderItems.Add(new OrderItem
+        {
+            Id = oiId, TenantId = TenantA, OrderId = deliveredId,
+            ProductId = productId, Quantity = 2, UnitRate = 40m
+        });
+        var deliveryId = Guid.NewGuid();
+        db.Deliveries.Add(new Delivery
+        {
+            Id = deliveryId, TenantId = TenantA, OrderId = deliveredId,
+            ScheduledDate = today, Status = DeliveryStatus.Delivered, JarsDelivered = 2, JarsReturned = 1
+        });
+        db.DeliveryItems.Add(new DeliveryItem
+        {
+            Id = Guid.NewGuid(), TenantId = TenantA, DeliveryId = deliveryId, OrderItemId = oiId,
+            ProductId = productId, JarsDelivered = 2, JarsReturned = 1
+        });
+        await db.SaveChangesAsync();
+
+        var handler = new Application.Features.Orders.Queries.GetOrders.GetOrdersQueryHandler(db);
+        var result = await handler.Handle(
+            new Application.Features.Orders.Queries.GetOrders.GetOrdersQuery(
+                new OrderFilterDto { CustomerId = customerId, SortBy = "orderDate", SortDir = "desc" }),
+            CancellationToken.None);
+
+        var delivered = result.Items.First(o => o.Id == deliveredId);
+        var pending = result.Items.First(o => o.Id == pendingId);
+
+        // Pending → ordered lines, no delivered lines.
+        Assert.Equal("20L Jar", Assert.Single(pending.Lines).ProductName);
+        Assert.Equal(3, pending.Lines[0].Quantity);
+        Assert.Empty(pending.DeliveredLines);
+
+        // Delivered → per-product out/back present.
+        var dl = Assert.Single(delivered.DeliveredLines);
+        Assert.Equal("20L Jar", dl.ProductName);
+        Assert.Equal(2, dl.JarsDelivered);
+        Assert.Equal(1, dl.JarsReturned);
+    }
+
+    [Fact]
+    public async Task GetOrders_SurfacesOffOrderEmptiesReturned()
+    {
+        // The customer handed back an empty of a DIFFERENT size than they ordered. It's an order-scoped
+        // Return movement for a product NOT on the order, and the list must show it.
+        var (db, _) = NewDb();
+        var (customerId, productId, _, _) = await SeedAsync(db);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var orderId = Guid.NewGuid();
+        db.Orders.Add(new Order
+        {
+            Id = orderId, TenantId = TenantA, CustomerId = customerId,
+            OrderDate = today, Status = OrderStatus.Delivered
+        });
+        db.OrderItems.Add(new OrderItem
+        {
+            Id = Guid.NewGuid(), TenantId = TenantA, OrderId = orderId,
+            ProductId = productId, Quantity = 1, UnitRate = 40m
+        });
+
+        // The off-order product returned during the run.
+        var otherProductId = Guid.NewGuid();
+        db.Products.Add(new Product
+        {
+            Id = otherProductId, TenantId = TenantA, Name = "18L Jar", BottleSize = BottleSize.EighteenL
+        });
+        db.InventoryMovements.Add(new InventoryMovement
+        {
+            Id = Guid.NewGuid(), TenantId = TenantA, ProductId = otherProductId, OrderId = orderId,
+            MovementType = InventoryMovementType.Return, Quantity = 2
+        });
+        // A Return for the order's OWN product must NOT count as an "other" empty.
+        db.InventoryMovements.Add(new InventoryMovement
+        {
+            Id = Guid.NewGuid(), TenantId = TenantA, ProductId = productId, OrderId = orderId,
+            MovementType = InventoryMovementType.Return, Quantity = 1
+        });
+        await db.SaveChangesAsync();
+
+        var handler = new Application.Features.Orders.Queries.GetOrders.GetOrdersQueryHandler(db);
+        var result = await handler.Handle(
+            new Application.Features.Orders.Queries.GetOrders.GetOrdersQuery(
+                new OrderFilterDto { CustomerId = customerId }),
+            CancellationToken.None);
+
+        var order = Assert.Single(result.Items);
+        var other = Assert.Single(order.OtherReturns);   // only the off-order 18L, not the on-order 20L
+        Assert.Equal("18L Jar", other.ProductName);
+        Assert.Equal(2, other.Quantity);
+    }
+
+    [Fact]
+    public async Task GetOrders_SortByDate_BreaksSameDayTiesByTime()
+    {
+        // OrderDate is date-only, so several orders on one day tie on it. Sorting must fall back to the
+        // placed-at time (CreatedAt), else same-day rows come back arbitrarily and look unsorted next
+        // to the time shown in the Date column.
+        var (db, _) = NewDb();
+        var (customerId, productId, _, _) = await SeedAsync(db);
+        var day = DateOnly.FromDateTime(DateTime.UtcNow);
+        var baseTime = new DateTime(2026, 7, 14, 8, 0, 0, DateTimeKind.Utc);
+
+        // Insert out of chronological order to prove the sort — not the insert order — decides it.
+        async Task Add(string tag, DateTime createdAt)
+        {
+            var id = Guid.NewGuid();
+            db.Orders.Add(new Order
+            {
+                Id = id, TenantId = TenantA, CustomerId = customerId,
+                OrderDate = day, Status = OrderStatus.Confirmed, Notes = tag, CreatedAt = createdAt
+            });
+            db.OrderItems.Add(new OrderItem
+            {
+                Id = Guid.NewGuid(), TenantId = TenantA, OrderId = id, ProductId = productId,
+                Quantity = 1, UnitRate = 40m
+            });
+            await db.SaveChangesAsync();
+        }
+        await Add("second", baseTime.AddHours(1));
+        await Add("third", baseTime.AddHours(2));
+        await Add("first", baseTime);
+
+        var handler = new Application.Features.Orders.Queries.GetOrders.GetOrdersQueryHandler(db);
+
+        var desc = await handler.Handle(new Application.Features.Orders.Queries.GetOrders.GetOrdersQuery(
+            new OrderFilterDto { CustomerId = customerId, SortBy = "orderDate", SortDir = "desc" }), CancellationToken.None);
+        // Newest time first within the same day.
+        Assert.Equal(new[] { baseTime.AddHours(2), baseTime.AddHours(1), baseTime }, desc.Items.Select(i => i.CreatedAt));
+
+        var asc = await handler.Handle(new Application.Features.Orders.Queries.GetOrders.GetOrdersQuery(
+            new OrderFilterDto { CustomerId = customerId, SortBy = "orderDate", SortDir = "asc" }), CancellationToken.None);
+        Assert.Equal(new[] { baseTime, baseTime.AddHours(1), baseTime.AddHours(2) }, asc.Items.Select(i => i.CreatedAt));
+    }
 }

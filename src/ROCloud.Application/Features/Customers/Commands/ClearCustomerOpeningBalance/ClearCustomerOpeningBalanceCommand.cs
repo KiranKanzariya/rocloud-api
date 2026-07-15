@@ -64,5 +64,9 @@ public class ClearCustomerOpeningBalanceCommandHandler : IRequestHandler<ClearCu
         if (invoices.Count > 0) _db.Invoices.RemoveRange(invoices);
 
         await _db.SaveChangesAsync(ct);
+
+        // Taking the opening advance away un-pays whatever it had settled — the remaining invoices must
+        // stop claiming to be paid. (SyncAsync is a full recompute, so it demotes as well as promotes.)
+        await Payments.InvoiceAllocationSync.SyncAsync(_db, customer.Id, ct);
     }
 }

@@ -90,6 +90,10 @@ public class ConfirmRazorpayPaymentCommandHandler : IRequestHandler<ConfirmRazor
 
         await _db.SaveChangesAsync(ct);
 
+        // The money only becomes real now (the row was Pending until this point), so re-settle the
+        // customer's invoices against it.
+        await InvoiceAllocationSync.SyncAsync(_db, payment.CustomerId, ct);
+
         _logger.LogInformation(
             "Razorpay payment {RpPaymentId} confirmed for local payment {PaymentId}",
             request.RazorpayPaymentId, payment.Id);

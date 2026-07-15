@@ -29,10 +29,27 @@ public class GetDeliveryDetailQueryHandler : IRequestHandler<GetDeliveryDetailQu
             .FirstOrDefaultAsync(d => d.Id == request.Id, ct)
             ?? throw new NotFoundException("Delivery", request.Id);
 
-        // Products referenced by the per-item rows + the order, resolved in one lookup.
         var orderProductIds = delivery.Order?.OrderItems.Select(i => i.ProductId).ToHashSet() ?? new();
-        var itemProductIds = delivery.Items.Select(i => i.ProductId).ToHashSet();
-        var allProductIds = orderProductIds.Concat(itemProductIds).Distinct().ToList();
+
+        // "Other empties" = Return movements tied to this order for products that weren't on it — so
+        // their product ids are, by definition, NOT among the order's items. Fetch them BEFORE the
+        // product lookup and feed their ids into it; otherwise the name/size resolve to blank and the
+        // row renders as "()".
+        var otherRaw = await _db.InventoryMovements
+            .Where(m => m.OrderId == delivery.OrderId
+                        && m.MovementType == InventoryMovementType.Return
+                        && !orderProductIds.Contains(m.ProductId))
+            .GroupBy(m => m.ProductId)
+            .Select(g => new { ProductId = g.Key, Quantity = g.Sum(x => x.Quantity) })
+            .ToListAsync(ct);
+
+        // Every product referenced anywhere on this screen — order items, per-item rows, AND the
+        // other-empties returns — resolved in one lookup.
+        var allProductIds = orderProductIds
+            .Concat(delivery.Items.Select(i => i.ProductId))
+            .Concat(otherRaw.Select(o => o.ProductId))
+            .Distinct()
+            .ToList();
         var products = await _db.Products
             .Where(p => allProductIds.Contains(p.Id))
             .Select(p => new { p.Id, p.Name, p.BottleSize })
@@ -44,14 +61,6 @@ public class GetDeliveryDetailQueryHandler : IRequestHandler<GetDeliveryDetailQu
             .Select(i => new DeliveryItemDetailDto(Name(i.ProductId), Size(i.ProductId), i.JarsDelivered, i.JarsReturned))
             .ToList();
 
-        // "Other empties" = Return movements tied to this order for products that weren't on it.
-        var otherRaw = await _db.InventoryMovements
-            .Where(m => m.OrderId == delivery.OrderId
-                        && m.MovementType == InventoryMovementType.Return
-                        && !orderProductIds.Contains(m.ProductId))
-            .GroupBy(m => m.ProductId)
-            .Select(g => new { ProductId = g.Key, Quantity = g.Sum(x => x.Quantity) })
-            .ToListAsync(ct);
         var otherReturns = otherRaw
             .Select(o => new DeliveryOtherReturnDto(Name(o.ProductId), Size(o.ProductId), o.Quantity))
             .ToList();

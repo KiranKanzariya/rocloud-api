@@ -8,5 +8,4 @@ public sealed class NoOpSubscriptionInvoiceDelivery : ISubscriptionInvoiceDelive
 {
     public Task IssueAsync(SubscriptionInvoice invoice, Tenant tenant, CancellationToken ct = default) => Task.CompletedTask;
     public Task ReceiptAsync(SubscriptionInvoice invoice, Tenant tenant, CancellationToken ct = default) => Task.CompletedTask;
-    public Task StorePdfAsync(SubscriptionInvoice invoice, Tenant tenant, CancellationToken ct = default) => Task.CompletedTask;
 }

@@ -48,7 +48,9 @@ public class GetCustomersQueryHandler : IRequestHandler<GetCustomersQuery, Paged
             query = query.Where(c => c.PaymentPreference == pp);
         if (!string.IsNullOrWhiteSpace(f.Search))
         {
-            var s = f.Search.ToLower();
+            // Trim: a pasted or autocompleted "ramesh " would otherwise match nothing at all.
+            // Mobile is a Contains, so typing the bare 10 digits still finds the stored "+91…" form.
+            var s = f.Search.Trim().ToLower();
             query = query.Where(c =>
                 c.Name.ToLower().Contains(s) ||
                 (c.Mobile != null && c.Mobile.Contains(s)) ||
@@ -56,14 +58,21 @@ public class GetCustomersQueryHandler : IRequestHandler<GetCustomersQuery, Paged
         }
 
         var descending = string.Equals(f.SortDir, "desc", StringComparison.OrdinalIgnoreCase);
-        query = (f.SortBy?.ToLowerInvariant()) switch
+        IOrderedQueryable<Domain.Entities.Tenant.Customer> ordered = (f.SortBy?.ToLowerInvariant()) switch
         {
             "name" => descending ? query.OrderByDescending(c => c.Name) : query.OrderBy(c => c.Name),
             "mobile" => descending ? query.OrderByDescending(c => c.Mobile) : query.OrderBy(c => c.Mobile),
             "code" => descending ? query.OrderByDescending(c => c.CustomerCode) : query.OrderBy(c => c.CustomerCode),
             "jarsout" => descending ? query.OrderByDescending(JarsOutExpr) : query.OrderBy(JarsOutExpr),
-            _ => descending ? query.OrderBy(c => c.CreatedAt) : query.OrderByDescending(c => c.CreatedAt)
+            // No (or unknown) sortBy → newest first, unconditionally. This branch used to consult
+            // `descending` with the ternary INVERTED relative to every branch above, so asking for
+            // sortDir=desc without a sortBy returned the OLDEST customers first. A direction without a
+            // column to sort by is meaningless, so honour neither rather than honour it backwards.
+            _ => query.OrderByDescending(c => c.CreatedAt)
         };
+        // Deterministic tiebreaker: names/mobiles/codes can repeat, so without a unique final key the
+        // order within a tie is arbitrary and pagination can drop or duplicate rows across pages.
+        query = ordered.ThenBy(c => c.Id);
 
         var total = await query.CountAsync(ct);
 

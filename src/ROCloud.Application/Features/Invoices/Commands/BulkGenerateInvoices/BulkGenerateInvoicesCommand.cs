@@ -66,6 +66,7 @@ public class BulkGenerateInvoicesCommandHandler
 
         var created = 0;
         var skipped = 0;
+        var billed = new List<Guid>();
 
         foreach (var c in customers)
         {
@@ -103,11 +104,19 @@ public class BulkGenerateInvoicesCommandHandler
             // Credit anything already paid against this period's orders so we don't re-bill it.
             await InvoicePaymentReconciler.CreditPriorPaymentsAsync(
                 _db, invoice, c.Id, request.PeriodFrom, request.PeriodTo, ct);
+            billed.Add(c.Id);
             created++;
         }
 
         if (created > 0)
+        {
             await _db.SaveChangesAsync(ct);
+
+            // A freshly raised invoice may already be covered by an advance the customer holds, so
+            // re-settle each one we billed rather than sending them a demand they have already paid.
+            foreach (var customerId in billed)
+                await Payments.InvoiceAllocationSync.SyncAsync(_db, customerId, ct);
+        }
 
         return new BulkInvoiceResultDto(created, customers.Count, skipped);
     }

@@ -27,8 +27,7 @@ public sealed record SubscriptionInvoiceDto(
     string Status,
     DateOnly DueDate,
     string? Description,
-    DateTime? PaidAt,
-    bool HasPdf);
+    DateTime? PaidAt);
 
 /// <summary>Usage counts vs the plan's limits.</summary>
 public sealed record UsageDto(

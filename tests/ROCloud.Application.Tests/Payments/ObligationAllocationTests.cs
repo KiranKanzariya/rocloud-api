@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using ROCloud.Application.Common.Interfaces;
-using ROCloud.Application.Features.Invoices;
+using ROCloud.Application.Common.Models;
+using ROCloud.Application.Features.Invoices.Dtos;
+using ROCloud.Application.Features.Invoices.Queries.GetInvoices;
 using ROCloud.Application.Features.Payments;
 using ROCloud.Application.Features.Payments.Commands.CollectPayment;
 using ROCloud.Application.Features.Payments.Queries.GetOutstandingDues;
@@ -13,9 +15,10 @@ using ROCloud.Infrastructure.Persistence;
 namespace ROCloud.Application.Tests.Payments;
 
 /// <summary>
-/// A payment the owner records on the CUSTOMER page carries no invoice/order link. It still has to
-/// settle what the customer owes — open invoices and delivered uninvoiced orders alike — oldest first.
-/// These cover the money maths for every PaymentPreference, not just Monthly.
+/// A payment the owner records on the CUSTOMER page carries no invoice link. It still has to settle
+/// what the customer owes — open invoices and delivered uninvoiced orders alike — oldest first, and the
+/// answer is WRITTEN DOWN (InvoiceAllocationSync) so the invoice list, its status filter and the
+/// reminders all read the same truth. Covers every PaymentPreference, not just Monthly.
 /// </summary>
 public class ObligationAllocationTests
 {
@@ -87,19 +90,23 @@ public class ObligationAllocationTests
         return id;
     }
 
-    private static async Task CollectOnCustomerPageAsync(AppDbContext db, TenantContext ctx, Guid customerId, decimal amount)
-    {
-        var handler = new CollectPaymentCommandHandler(
-            db, ctx, new FakeCurrentUser(), NullLogger<CollectPaymentCommandHandler>.Instance);
-        // The customer-page modal sends no invoiceId and no orderId — that is the whole point.
-        await handler.Handle(new CollectPaymentCommand(
-            customerId, null, null, amount, nameof(PaymentMethod.Cash), null, null), CancellationToken.None);
-    }
+    /// <summary>The customer-page modal sends no invoiceId and no orderId — that is the whole point.</summary>
+    private static Task CollectOnCustomerPageAsync(AppDbContext db, TenantContext ctx, Guid customerId, decimal amount) =>
+        new CollectPaymentCommandHandler(db, ctx, new FakeCurrentUser(), NullLogger<CollectPaymentCommandHandler>.Instance)
+            .Handle(new CollectPaymentCommand(
+                customerId, null, null, amount, nameof(PaymentMethod.Cash), null, null), CancellationToken.None);
+
+    /// <summary>The invoice as the database now holds it — no derivation anywhere.</summary>
+    private static Invoice Stored(AppDbContext db, Guid invoiceId) =>
+        db.Invoices.AsNoTracking().First(i => i.Id == invoiceId);
+
+    private static Task<decimal> BalanceAsync(AppDbContext db, Guid customerId) =>
+        ROCloud.Application.Features.Customers.CustomerBalance.ComputeAsync(db, customerId, CancellationToken.None);
 
     [Fact]
     public async Task LumpSum_SettlesInvoicesOldestFirst_AndPartiallyPaysTheLast()
     {
-        // Scenario 1: three invoices 400 + 400 + 300, one ₹1000 collection.
+        // Three invoices 400 + 400 + 300, one ₹1000 collection.
         var (db, ctx) = NewDb();
         var customerId = AddCustomer(db, PaymentPreference.Monthly);
         var inv1 = AddInvoice(db, customerId, 400m, 0);
@@ -109,23 +116,19 @@ public class ObligationAllocationTests
 
         await CollectOnCustomerPageAsync(db, ctx, customerId, 1000m);
 
-        var applied = (await CustomerObligationAllocator.ComputeAsync(db, [customerId], CancellationToken.None)).Invoices;
-        Assert.Equal(400m, applied[inv1]);
-        Assert.Equal(400m, applied[inv2]);
-        Assert.Equal(200m, applied[inv3]);   // 1000 − 800
+        Assert.Equal(InvoiceStatus.Paid, Stored(db, inv1).Status);
+        Assert.Equal(InvoiceStatus.Paid, Stored(db, inv2).Status);
 
-        Assert.Equal(InvoiceStatus.Paid, Resolve(db, inv1, applied).Status);
-        Assert.Equal(InvoiceStatus.Paid, Resolve(db, inv2, applied).Status);
-
-        var third = Resolve(db, inv3, applied);
+        var third = Stored(db, inv3);
         Assert.Equal(InvoiceStatus.PartiallyPaid, third.Status);
-        Assert.Equal(100m, third.Balance);
+        Assert.Equal(200m, third.PaidAmount);                       // 1000 − 800
+        Assert.Equal(100m, third.TotalAmount - third.PaidAmount);
     }
 
     [Fact]
     public async Task LumpSum_LargerThanEverythingOwed_LeavesTheSurplusAsAdvance()
     {
-        // Scenario 2: two invoices 400 + 400, one ₹1000 collection → both paid, ₹200 credit.
+        // Two invoices 400 + 400, one ₹1000 collection → both paid, ₹200 credit.
         var (db, ctx) = NewDb();
         var customerId = AddCustomer(db, PaymentPreference.Monthly);
         var inv1 = AddInvoice(db, customerId, 400m, 0);
@@ -134,13 +137,9 @@ public class ObligationAllocationTests
 
         await CollectOnCustomerPageAsync(db, ctx, customerId, 1000m);
 
-        var applied = (await CustomerObligationAllocator.ComputeAsync(db, [customerId], CancellationToken.None)).Invoices;
-        Assert.Equal(InvoiceStatus.Paid, Resolve(db, inv1, applied).Status);
-        Assert.Equal(InvoiceStatus.Paid, Resolve(db, inv2, applied).Status);
-
-        // The ₹200 surplus is a credit, not money stuck on an invoice.
-        var balance = await ROCloud.Application.Features.Customers.CustomerBalance.ComputeAsync(db, customerId, CancellationToken.None);
-        Assert.Equal(-200m, balance);
+        Assert.Equal(InvoiceStatus.Paid, Stored(db, inv1).Status);
+        Assert.Equal(InvoiceStatus.Paid, Stored(db, inv2).Status);
+        Assert.Equal(-200m, await BalanceAsync(db, customerId));   // a credit, not money stuck on a row
     }
 
     [Theory]
@@ -150,8 +149,8 @@ public class ObligationAllocationTests
     [InlineData(PaymentPreference.Combined)]
     public async Task OlderInvoiceIsSettledBeforeNewerOrders_ForEveryPaymentPreference(PaymentPreference preference)
     {
-        // The imported-opening-balance case: an old invoice plus later deliveries. Only Monthly customers
-        // are auto-invoiced, but ANY preference can hold an opening invoice — so the ladder must not care.
+        // The imported-opening-balance case. Only Monthly customers are auto-invoiced, but ANY
+        // preference can hold an opening invoice — so the ladder must not care which one they are.
         var (db, ctx) = NewDb();
         var customerId = AddCustomer(db, preference);
         var opening = AddInvoice(db, customerId, 450m, 0);      // 1 Jul — the imported due
@@ -160,23 +159,19 @@ public class ObligationAllocationTests
 
         await CollectOnCustomerPageAsync(db, ctx, customerId, 500m);
 
-        var result = await CustomerObligationAllocator.ComputeAsync(db, [customerId], CancellationToken.None);
-
         // Oldest first: the ₹450 invoice is cleared, and only the ₹50 left over reaches the order.
-        Assert.Equal(450m, result.Invoices[opening]);
-        Assert.Equal(50m, result.Orders[order]);
-        Assert.Equal(InvoiceStatus.Paid, Resolve(db, opening, result.Invoices).Status);
+        Assert.Equal(InvoiceStatus.Paid, Stored(db, opening).Status);
 
-        // 450 + 300 owed − 500 paid = 250 still due.
-        var balance = await ROCloud.Application.Features.Customers.CustomerBalance.ComputeAsync(db, customerId, CancellationToken.None);
-        Assert.Equal(250m, balance);
+        var orderShare = await CustomerObligationAllocator.ComputeAsync(db, [customerId], CancellationToken.None);
+        Assert.Equal(50m, orderShare.Orders[order]);
+
+        Assert.Equal(250m, await BalanceAsync(db, customerId));   // 450 + 300 owed − 500 paid
     }
 
     [Fact]
     public async Task PaidInvoice_DoesNotTriggerAPaymentReminder()
     {
-        // The bug this whole change exists for: the owner paid, but the reminder kept chasing them
-        // because the payment was never linked to the invoice row.
+        // The bug this whole change exists for: the owner paid, but the reminder kept chasing them.
         var (db, ctx) = NewDb();
         var customerId = AddCustomer(db, PaymentPreference.PerBottle);
         AddInvoice(db, customerId, 450m, -30);   // long overdue
@@ -188,8 +183,26 @@ public class ObligationAllocationTests
 
         await CollectOnCustomerPageAsync(db, ctx, customerId, 450m);
 
-        var after = await handler.Handle(new GetOutstandingDuesQuery(7), CancellationToken.None);
-        Assert.Empty(after);
+        Assert.Empty(await handler.Handle(new GetOutstandingDuesQuery(7), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task TheStatusFilter_FindsAnInvoiceSettledFromTheCustomerPage()
+    {
+        // Because the status is written down rather than derived at read time, the SQL filter agrees
+        // with what is rendered. Derived, "status=Paid" missed this invoice entirely.
+        var (db, ctx) = NewDb();
+        var customerId = AddCustomer(db, PaymentPreference.Monthly);
+        var invoiceId = AddInvoice(db, customerId, 400m, 0);
+        await db.SaveChangesAsync();
+
+        await CollectOnCustomerPageAsync(db, ctx, customerId, 400m);
+
+        var paid = await Invoices(db, new InvoiceFilterDto { Status = nameof(InvoiceStatus.Paid) });
+        Assert.Equal(invoiceId, Assert.Single(paid.Items).Id);
+
+        var sent = await Invoices(db, new InvoiceFilterDto { Status = nameof(InvoiceStatus.Sent) });
+        Assert.Empty(sent.Items);   // it is no longer Sent, and must not be returned as though it were
     }
 
     [Fact]
@@ -211,13 +224,12 @@ public class ObligationAllocationTests
 
         await CollectOnCustomerPageAsync(db, ctx, customerId, 300m);
 
-        var result = await CustomerObligationAllocator.ComputeAsync(db, [customerId], CancellationToken.None);
-        Assert.Equal(250m, result.Invoices[invoiceId]);  // 400 − 150 already recorded
-        Assert.Equal(50m, result.Orders[order]);         // only the remainder of the 300 reaches it
+        var invoice = Stored(db, invoiceId);
+        Assert.Equal(400m, invoice.PaidAmount);   // 150 linked + 250 from the pool
+        Assert.Equal(InvoiceStatus.Paid, invoice.Status);
 
-        var resolved = Resolve(db, invoiceId, result.Invoices);
-        Assert.Equal(400m, resolved.PaidAmount);
-        Assert.Equal(InvoiceStatus.Paid, resolved.Status);
+        var orderShare = await CustomerObligationAllocator.ComputeAsync(db, [customerId], CancellationToken.None);
+        Assert.Equal(50m, orderShare.Orders[order]);   // only the remainder of the 300 reaches it
     }
 
     [Fact]
@@ -231,24 +243,86 @@ public class ObligationAllocationTests
         var order = AddDeliveredOrder(db, customerId, 200m, 2);
         await db.SaveChangesAsync();
 
-        var handler = new CollectPaymentCommandHandler(
-            db, ctx, new FakeCurrentUser(), NullLogger<CollectPaymentCommandHandler>.Instance);
-        await handler.Handle(new CollectPaymentCommand(
-            customerId, invoiceId, null, 500m, nameof(PaymentMethod.Cash), null, null), CancellationToken.None);
+        await new CollectPaymentCommandHandler(db, ctx, new FakeCurrentUser(), NullLogger<CollectPaymentCommandHandler>.Instance)
+            .Handle(new CollectPaymentCommand(
+                customerId, invoiceId, null, 500m, nameof(PaymentMethod.Cash), null, null), CancellationToken.None);
 
-        var invoice = await db.Invoices.FirstAsync(i => i.Id == invoiceId);
+        var invoice = Stored(db, invoiceId);
         Assert.Equal(400m, invoice.PaidAmount);   // capped, not 500
         Assert.Equal(InvoiceStatus.Paid, invoice.Status);
 
-        var result = await CustomerObligationAllocator.ComputeAsync(db, [customerId], CancellationToken.None);
-        Assert.Equal(100m, result.Orders[order]); // the surplus, spent on the next thing owed
+        var orderShare = await CustomerObligationAllocator.ComputeAsync(db, [customerId], CancellationToken.None);
+        Assert.Equal(100m, orderShare.Orders[order]);   // the surplus, spent on the next thing owed
     }
 
-    /// <summary>The invoice as the owner sees it: recorded payments plus its share of the pool.</summary>
-    private static (decimal PaidAmount, decimal Balance, InvoiceStatus Status) Resolve(
-        AppDbContext db, Guid invoiceId, IReadOnlyDictionary<Guid, decimal> applied)
+    [Fact]
+    public async Task Backfill_SettlesInvoicesThatPredateTheSync()
     {
-        var i = db.Invoices.AsNoTracking().First(x => x.Id == invoiceId);
-        return InvoicePaymentStatus.Resolve(i.Status, i.TotalAmount, i.PaidAmount, applied.GetValueOrDefault(invoiceId, 0m));
+        // Data written before materialisation existed: a payment sitting against the customer with no
+        // link, and an invoice still marked Sent. The nightly job's recompute must put it right — this
+        // is what stops legacy invoices being dunned for money already collected.
+        var (db, _) = NewDb();
+        var customerId = AddCustomer(db, PaymentPreference.Monthly);
+        var invoiceId = AddInvoice(db, customerId, 400m, 0);
+        db.Payments.Add(new Payment
+        {
+            Id = Guid.NewGuid(), TenantId = TenantA, CustomerId = customerId, InvoiceId = null,
+            Amount = 400m, PaymentMethod = PaymentMethod.Cash, Status = PaymentStatus.Completed,
+            PaidAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        Assert.Equal(InvoiceStatus.Sent, Stored(db, invoiceId).Status);   // stale, as on a live DB today
+
+        await InvoiceAllocationSync.SyncAsync(db, customerId, CancellationToken.None);
+
+        var invoice = Stored(db, invoiceId);
+        Assert.Equal(400m, invoice.PaidAmount);
+        Assert.Equal(InvoiceStatus.Paid, invoice.Status);
     }
+
+    [Fact]
+    public async Task Sync_IsIdempotent_RunningItTwiceChangesNothing()
+    {
+        // The nightly safety net re-runs over every customer. It must never double-count.
+        var (db, ctx) = NewDb();
+        var customerId = AddCustomer(db, PaymentPreference.Monthly);
+        var invoiceId = AddInvoice(db, customerId, 400m, 0);
+        await db.SaveChangesAsync();
+
+        await CollectOnCustomerPageAsync(db, ctx, customerId, 250m);
+        var afterFirst = Stored(db, invoiceId).PaidAmount;
+
+        await InvoiceAllocationSync.SyncAsync(db, customerId, CancellationToken.None);
+        await InvoiceAllocationSync.SyncAsync(db, customerId, CancellationToken.None);
+
+        Assert.Equal(250m, afterFirst);
+        Assert.Equal(250m, Stored(db, invoiceId).PaidAmount);
+        Assert.Equal(InvoiceStatus.PartiallyPaid, Stored(db, invoiceId).Status);
+    }
+
+    [Fact]
+    public async Task WhenTheMoneyGoesAway_APaidInvoiceIsDemotedAgain()
+    {
+        // SyncAsync is a full recompute, not an increment: if the payment behind a Paid invoice is
+        // reversed, the invoice must stop claiming to be paid rather than silently keeping the status.
+        var (db, ctx) = NewDb();
+        var customerId = AddCustomer(db, PaymentPreference.Monthly);
+        var invoiceId = AddInvoice(db, customerId, 400m, 0);
+        await db.SaveChangesAsync();
+
+        await CollectOnCustomerPageAsync(db, ctx, customerId, 400m);
+        Assert.Equal(InvoiceStatus.Paid, Stored(db, invoiceId).Status);
+
+        db.Payments.RemoveRange(await db.Payments.Where(p => p.CustomerId == customerId).ToListAsync());
+        await db.SaveChangesAsync();
+        await InvoiceAllocationSync.SyncAsync(db, customerId, CancellationToken.None);
+
+        var invoice = Stored(db, invoiceId);
+        Assert.Equal(0m, invoice.PaidAmount);
+        Assert.Equal(InvoiceStatus.Sent, invoice.Status);   // owed again
+    }
+
+    private static Task<PagedResult<InvoiceListItemDto>> Invoices(AppDbContext db, InvoiceFilterDto filter) =>
+        new GetInvoicesQueryHandler(db).Handle(new GetInvoicesQuery(filter), CancellationToken.None);
 }

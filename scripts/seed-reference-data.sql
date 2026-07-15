@@ -326,7 +326,7 @@ WHERE NOT EXISTS (
 -- NOTE: the platform SuperAdmin login is created separately by
 -- scripts/create-platform-admin.sql (run as postgres) — it is not seeded here.
 SELECT 'plans'                  AS table, count(*) AS rows, 3  AS expected FROM public.plans
-UNION ALL SELECT 'permissions',            count(*), 28 FROM public.permissions
+UNION ALL SELECT 'permissions',            count(*), 33 FROM public.permissions
 UNION ALL SELECT 'audit_settings',         count(*), 1  FROM public.audit_settings
 UNION ALL SELECT 'notification_templates (system default)', count(*), 39
           FROM public.notification_templates WHERE tenant_id IS NULL

@@ -160,8 +160,7 @@ public class SubscriptionExpiryJob
                 var freeInvoice = await SubscriptionInvoiceFactory.BuildAsync(
                     db, t, t.Plan, cycle, DateOnly.FromDateTime(basis), SubscriptionInvoiceStatus.Paid,
                     $"{t.Plan.Name} plan — 1 {unit} (free renewal)", ct);
-                db.SubscriptionInvoices.Add(freeInvoice);
-                await invoiceDelivery.StorePdfAsync(freeInvoice, t, ct);   // downloadable PDF, no email
+                db.SubscriptionInvoices.Add(freeInvoice);   // no email; its PDF renders on demand
                 t.SubscriptionEndsAt = yearly ? basis.AddYears(1) : basis.AddMonths(1);
                 t.Status = TenantStatus.Active;
                 autoRenewed++;
@@ -173,7 +172,7 @@ public class SubscriptionExpiryJob
                 db, t, t.Plan, cycle, DateOnly.FromDateTime(t.SubscriptionEndsAt!.Value),
                 SubscriptionInvoiceStatus.Pending, $"{t.Plan.Name} plan — 1 {unit} renewal", ct);
             db.SubscriptionInvoices.Add(invoice);
-            await invoiceDelivery.IssueAsync(invoice, t, ct);   // store PDF + email owner (best-effort)
+            await invoiceDelivery.IssueAsync(invoice, t, ct);   // email owner the invoice (best-effort)
             tenantsWithOpenInvoice.Add(t.Id);
             invoicesCreated++;
         }

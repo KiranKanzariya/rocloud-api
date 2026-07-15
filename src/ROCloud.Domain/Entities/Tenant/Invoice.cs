@@ -21,7 +21,6 @@ public class Invoice : BaseEntity, ITenantEntity
     public InvoiceStatus Status { get; set; } = InvoiceStatus.Draft;
     public string? GstNumber { get; set; }
     public string? Notes { get; set; }
-    public string? PdfUrl { get; set; }
 
     // Navigation
     public Customer? Customer { get; set; }

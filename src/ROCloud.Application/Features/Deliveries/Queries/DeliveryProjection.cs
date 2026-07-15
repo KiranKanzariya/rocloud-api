@@ -34,5 +34,14 @@ internal static class DeliveryProjection
                 ? d.Order.OrderItems
                     .Select(oi => new DeliveryLineDto(oi.Product != null ? oi.Product.Name : string.Empty, oi.Quantity))
                     .ToList()
-                : new List<DeliveryLineDto>()));
+                : new List<DeliveryLineDto>(),
+            // Per-product out/back for a completed stop. Product name via a correlated lookup (the
+            // delivery_items rows carry only a product id). Bottle size is intentionally omitted — it
+            // isn't SQL-translatable here (ToWire) and the compact card shows the name alone anyway.
+            d.Items
+                .Select(di => new DeliveredLineDto(
+                    db.Products.Where(p => p.Id == di.ProductId).Select(p => p.Name).FirstOrDefault() ?? string.Empty,
+                    di.JarsDelivered,
+                    di.JarsReturned))
+                .ToList()));
 }

@@ -41,7 +41,6 @@ public sealed record InvoiceDto(
     string Status,
     string? GstNumber,
     string? Notes,
-    string? PdfUrl,
     DateTime CreatedAt,
     IReadOnlyList<InvoiceLineItemDto> LineItems);
 

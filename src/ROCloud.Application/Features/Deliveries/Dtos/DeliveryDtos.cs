@@ -26,10 +26,25 @@ public sealed record DeliveryListItemDto(
     decimal? Longitude,
     string? Notes,
     // The order's lines (product + ordered qty) so a card can show what/how many to deliver.
-    IReadOnlyList<DeliveryLineDto> Items);
+    IReadOnlyList<DeliveryLineDto> Items,
+    // Per-product jars actually handed over / brought back — shown on a Delivered card so the board
+    // reveals WHICH jar went out and came back, not just the total. Empty until delivered (and for
+    // older single-count deliveries, which have no per-item rows).
+    IReadOnlyList<DeliveredLineDto> DeliveredLines)
+{
+    // Off-order empties returned on this stop (product not on the order). Not part of the SQL
+    // projection — it needs an in-memory group — so the board handler fills it after materialising.
+    public IReadOnlyList<DeliveredOtherReturnDto> OtherReturns { get; set; } = [];
+}
+
+/// <summary>An off-order empty returned on a delivery card: product name + how many.</summary>
+public sealed record DeliveredOtherReturnDto(string ProductName, int Quantity);
 
 /// <summary>An ordered line on a delivery card: product name + ordered jar quantity.</summary>
 public sealed record DeliveryLineDto(string ProductName, int Quantity);
+
+/// <summary>A completed line on a delivery card: product name + jars out / back.</summary>
+public sealed record DeliveredLineDto(string ProductName, int JarsDelivered, int JarsReturned);
 
 /// <summary>What was actually recorded at a completed stop — for the read-only delivery summary.</summary>
 public sealed record DeliveryDetailDto(

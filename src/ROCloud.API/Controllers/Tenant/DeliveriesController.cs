@@ -10,6 +10,7 @@ using ROCloud.Application.Features.Deliveries.Dtos;
 using ROCloud.Application.Features.Deliveries.Queries.GetDeliveries;
 using ROCloud.Application.Features.Deliveries.Queries.GetDeliveryBoard;
 using ROCloud.Application.Features.Deliveries.Queries.GetDeliveryDetail;
+using ROCloud.Application.Features.Deliveries.Queries.GetDeliveryProductTotals;
 using ROCloud.Application.Features.Deliveries.Queries.GetDeliverySummary;
 using ROCloud.Application.Features.Deliveries.Queries.GetMyRoute;
 using ROCloud.Application.Features.Deliveries.Services;
@@ -48,6 +49,13 @@ public class DeliveriesController : ControllerBase
     public async Task<IActionResult> GetSummary([FromQuery] DeliveryFilterDto filter, CancellationToken ct)
         => Ok(ApiResponse<IReadOnlyList<DeliverySummaryRowDto>>.Ok(
             await _mediator.Send(new GetDeliverySummaryQuery(filter), ct)));
+
+    /// <summary>Per-product jar totals for the day's deliveries — the dashboard card's breakdown.</summary>
+    [HttpGet("product-totals")]
+    [RequirePermission("Deliveries.View")]
+    public async Task<IActionResult> GetProductTotals([FromQuery] DeliveryFilterDto filter, CancellationToken ct)
+        => Ok(ApiResponse<IReadOnlyList<BoardItemTotalDto>>.Ok(
+            await _mediator.Send(new GetDeliveryProductTotalsQuery(filter), ct)));
 
     [HttpGet("my-route")]
     [RequirePermission("Deliveries.ViewOwn")]

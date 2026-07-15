@@ -62,7 +62,9 @@ public class GetAuditLogsQueryHandler : IRequestHandler<GetAuditLogsQuery, Paged
         var total = await query.CountAsync(ct);
 
         var items = await query
-            .OrderByDescending(a => a.CreatedAt)
+            // Id tiebreaker: audit rows can share a CreatedAt under load, and without a unique final
+            // key paging over them is non-deterministic (a row can repeat or be skipped).
+            .OrderByDescending(a => a.CreatedAt).ThenByDescending(a => a.Id)
             .Skip((page - 1) * pageSize).Take(pageSize)
             .Select(a => new AuditLogDto(
                 a.Id,

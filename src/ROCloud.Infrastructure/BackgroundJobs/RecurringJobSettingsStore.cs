@@ -44,10 +44,14 @@ public class RecurringJobSettingsStore
     }
 
     /// <summary>Insert a default row for a job the first time it's seen. No-op if it already exists.</summary>
-    public void SeedIfMissing(string jobId, string cron)
+    public void SeedIfMissing(string jobId, string cron, bool enabled = true)
         => Execute(
-            "INSERT INTO recurring_job_settings (job_id, cron, enabled) VALUES (@id, @cron, TRUE) ON CONFLICT (job_id) DO NOTHING",
-            jobId, cmd => cmd.Parameters.AddWithValue("@cron", cron));
+            "INSERT INTO recurring_job_settings (job_id, cron, enabled) VALUES (@id, @cron, @enabled) ON CONFLICT (job_id) DO NOTHING",
+            jobId, cmd =>
+            {
+                cmd.Parameters.AddWithValue("@cron", cron);
+                cmd.Parameters.AddWithValue("@enabled", enabled);
+            });
 
     public bool SetEnabled(string jobId, bool enabled)
         => Execute(

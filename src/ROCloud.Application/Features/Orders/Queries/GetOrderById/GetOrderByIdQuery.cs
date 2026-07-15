@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
+using ROCloud.Application.Features.Deliveries;
 using ROCloud.Application.Features.Orders.Dtos;
 using ROCloud.Application.Features.Payments;
 using ROCloud.Domain.Enums;
@@ -22,7 +23,7 @@ public class GetOrderByIdQueryHandler : IRequestHandler<GetOrderByIdQuery, Order
             .Include(o => o.Customer)
             .Include(o => o.Area)
             .Include(o => o.OrderItems).ThenInclude(i => i.Product)
-            .Include(o => o.Delivery)
+            .Include(o => o.Delivery).ThenInclude(d => d!.Items)
             .FirstOrDefaultAsync(o => o.Id == request.Id, ct)
             ?? throw new NotFoundException("Order", request.Id);
 
@@ -51,12 +52,41 @@ public class GetOrderByIdQueryHandler : IRequestHandler<GetOrderByIdQuery, Order
                 i.Quantity, i.UnitRate, i.Quantity * i.UnitRate))
             .ToList();
 
-        OrderDeliveryDto? delivery = order.Delivery is { } d
-            ? new OrderDeliveryDto(
+        // Per-product out/back for the delivery. A delivery item can reference a product NOT on the
+        // order (an empty of another size brought back), so resolve names from a lookup that also
+        // covers those — the order's own OrderItems don't include them.
+        OrderDeliveryDto? delivery = null;
+        if (order.Delivery is { } d)
+        {
+            var deliveryProductIds = d.Items.Select(di => di.ProductId).Distinct().ToList();
+            var productNames = deliveryProductIds.Count == 0
+                ? new Dictionary<Guid, (string Name, string Size)>()
+                : await _db.Products
+                    .Where(p => deliveryProductIds.Contains(p.Id))
+                    .Select(p => new { p.Id, p.Name, p.BottleSize })
+                    .ToDictionaryAsync(p => p.Id, p => (Name: p.Name, Size: p.BottleSize.ToWire()), ct);
+
+            var deliveryItems = d.Items
+                .Select(di =>
+                {
+                    productNames.TryGetValue(di.ProductId, out var p);
+                    return new OrderDeliveryItemDto(
+                        p.Name ?? string.Empty, p.Size ?? string.Empty, di.JarsDelivered, di.JarsReturned);
+                })
+                .OrderBy(x => x.ProductName)
+                .ToList();
+
+            // Empties returned for a product not on this order (order-scoped Return movements).
+            var otherByOrder = await OrderOtherReturns.ComputeAsync(_db, new[] { order.Id }, ct);
+            var otherReturns = (otherByOrder.GetValueOrDefault(order.Id) ?? [])
+                .Select(l => new OrderOtherReturnDto(l.ProductName, l.BottleSize, l.Quantity))
+                .ToList();
+
+            delivery = new OrderDeliveryDto(
                 d.Id, d.Status.ToString(), d.ScheduledDate, d.DeliveredAt,
                 d.JarsDelivered, d.JarsReturned, d.CollectedAmount,
-                d.PaymentMethod?.ToString(), d.ProofImageUrl)
-            : null;
+                d.PaymentMethod?.ToString(), d.ProofImageUrl, deliveryItems, otherReturns);
+        }
 
         return new OrderDto(
             order.Id, order.OrderDate, order.CustomerId,

@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Interfaces;
 using ROCloud.Application.Common.Models;
+using ROCloud.Application.Features.Deliveries;
 using ROCloud.Application.Features.Orders.Dtos;
 using ROCloud.Application.Features.Payments;
 using ROCloud.Domain.Entities.Tenant;
@@ -37,14 +38,23 @@ public class GetOrdersQueryHandler : IRequestHandler<GetOrdersQuery, PagedResult
         }
 
         var descending = !string.Equals(f.SortDir, "asc", StringComparison.OrdinalIgnoreCase);
-        query = (f.SortBy?.ToLowerInvariant()) switch
+        // Every sort needs a tiebreaker. OrderDate is date-ONLY, so all of a day's orders tie on it —
+        // without a secondary key their order is arbitrary (looks unsorted next to the time shown in the
+        // Date column) AND unstable across pages. CreatedAt (the real placed-at instant) breaks the date
+        // tie chronologically; Id makes it fully deterministic for pagination.
+        IOrderedQueryable<Order> ordered = (f.SortBy?.ToLowerInvariant()) switch
         {
             "status" => descending ? query.OrderByDescending(o => o.Status) : query.OrderBy(o => o.Status),
             "customer" => descending
                 ? query.OrderByDescending(o => o.Customer!.Name)
                 : query.OrderBy(o => o.Customer!.Name),
-            _ => descending ? query.OrderByDescending(o => o.OrderDate) : query.OrderBy(o => o.OrderDate)
+            _ => descending
+                ? query.OrderByDescending(o => o.OrderDate).ThenByDescending(o => o.CreatedAt)
+                : query.OrderBy(o => o.OrderDate).ThenBy(o => o.CreatedAt)
         };
+        query = descending
+            ? ordered.ThenByDescending(o => o.Id)
+            : ordered.ThenBy(o => o.Id);
 
         var total = await query.CountAsync(ct);
 
@@ -67,6 +77,18 @@ public class GetOrdersQueryHandler : IRequestHandler<GetOrdersQuery, PagedResult
                 o.Status,
                 ItemCount = o.OrderItems.Count,
                 o.CustomerId,
+                Lines = o.OrderItems
+                    .Select(oi => new OrderLineSummaryDto(oi.Product != null ? oi.Product.Name : string.Empty, oi.Quantity))
+                    .ToList(),
+                // Per-product out/back from the linked delivery's item rows (empty until delivered).
+                DeliveredLines = o.Delivery == null
+                    ? new List<OrderDeliveredLineDto>()
+                    : o.Delivery.Items
+                        .Select(di => new OrderDeliveredLineDto(
+                            _db.Products.Where(p => p.Id == di.ProductId).Select(p => p.Name).FirstOrDefault() ?? string.Empty,
+                            di.JarsDelivered,
+                            di.JarsReturned))
+                        .ToList(),
                 // Computed from quantity * unit_rate so it works on InMemory (generated column is DB-only).
                 TotalAmount = o.OrderItems.Sum(i => (decimal?)(i.Quantity * i.UnitRate)) ?? 0m,
                 DeliveryStatus = o.Delivery != null ? (DeliveryStatus?)o.Delivery.Status : null,
@@ -86,14 +108,20 @@ public class GetOrdersQueryHandler : IRequestHandler<GetOrdersQuery, PagedResult
             .Select(r => r.CustomerId).Distinct().ToList();
         var allocations = (await CustomerObligationAllocator.ComputeAsync(_db, customerIds, ct)).Orders;
 
+        // Off-order empties for this page's orders, in one batch.
+        var otherReturns = await OrderOtherReturns.ComputeAsync(_db, rows.Select(r => r.Id).ToList(), ct);
+
         var items = rows.Select(r =>
         {
             var (amountPaid, paymentStatus) = OrderPaymentStatus.Resolve(
                 r.Status, r.Invoiced, r.TotalAmount, allocations.GetValueOrDefault(r.Id, 0m));
+            var other = (otherReturns.GetValueOrDefault(r.Id) ?? [])
+                .Select(l => new OrderDeliveredOtherReturnDto(l.ProductName, l.Quantity)).ToList();
             return new OrderListItemDto(
                 r.Id, r.OrderDate, r.CustomerName, r.CustomerMobile, r.AreaName, r.DeliveryBoyName,
                 r.OrderType.ToString(), r.DeliveryMode.ToString(), r.Status.ToString(),
-                r.ItemCount, r.TotalAmount, r.DeliveryStatus?.ToString(), amountPaid, paymentStatus, r.CreatedAt);
+                r.ItemCount, r.TotalAmount, r.DeliveryStatus?.ToString(), amountPaid, paymentStatus, r.CreatedAt,
+                r.Lines, r.DeliveredLines, other);
         }).ToList();
 
         return new PagedResult<OrderListItemDto>(items, total, page, pageSize);

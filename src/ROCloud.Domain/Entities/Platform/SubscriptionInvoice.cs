@@ -36,9 +36,6 @@ public class SubscriptionInvoice : BaseEntity
     public string? RazorpayPaymentId { get; set; }
     public DateTime? PaidAt { get; set; }
 
-    /// <summary>Stored PDF path (via IFileStorage, folder "subscription-invoices"). Set in Stage 2.</summary>
-    public string? PdfUrl { get; set; }
-
     // Navigation
     public Tenant? Tenant { get; set; }
 }

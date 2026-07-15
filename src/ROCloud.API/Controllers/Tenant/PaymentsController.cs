@@ -9,6 +9,7 @@ using ROCloud.Application.Features.Payments.Commands.ConfirmRazorpayPayment;
 using ROCloud.Application.Features.Payments.Commands.InitiateRazorpayPayment;
 using ROCloud.Application.Features.Payments.Dtos;
 using ROCloud.Application.Features.Payments.Queries.GetOutstandingDues;
+using ROCloud.Application.Features.Payments.Queries.GetPaymentSummary;
 using ROCloud.Application.Features.Payments.Queries.GetPayments;
 
 namespace ROCloud.API.Controllers.Tenant;
@@ -26,6 +27,14 @@ public class PaymentsController : ControllerBase
     [RequirePermission("Payments.View")]
     public async Task<IActionResult> GetPayments([FromQuery] PaymentFilterDto filter, CancellationToken ct)
         => Ok(ApiResponse<PagedResult<PaymentListItemDto>>.Ok(await _mediator.Send(new GetPaymentsQuery(filter), ct)));
+
+    /// <summary>Collection totals for a window, summed in the DB — the money tiles must not depend on a page size.</summary>
+    [HttpGet("summary")]
+    [RequirePermission("Payments.View")]
+    public async Task<IActionResult> GetSummary(
+        [FromQuery] DateOnly? fromDate, [FromQuery] DateOnly? toDate, CancellationToken ct)
+        => Ok(ApiResponse<PaymentSummaryDto>.Ok(
+            await _mediator.Send(new GetPaymentSummaryQuery(fromDate, toDate), ct)));
 
     [HttpGet("outstanding")]
     [RequirePermission("Payments.View")]

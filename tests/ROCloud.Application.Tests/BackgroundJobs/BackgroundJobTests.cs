@@ -549,8 +549,6 @@ public class BackgroundJobTests
             Assert.Single(invoices);
             Assert.Equal("Pending", invoices[0].Status);
             Assert.Equal(999m, invoices[0].Amount);
-            Assert.False(string.IsNullOrEmpty(invoices[0].PdfUrl));   // delivery stored the PDF
-
         }
     }
 
@@ -589,7 +587,6 @@ public class BackgroundJobTests
             Assert.Single(invoices);
             Assert.Equal("Paid", invoices[0].Status);                           // ₹0 Paid record, not Pending
             Assert.Equal(0m, invoices[0].Amount);
-            Assert.False(string.IsNullOrEmpty(invoices[0].PdfUrl));             // free renewals get a downloadable PDF
         }
     }
 

@@ -34,8 +34,13 @@ public sealed record AssignedAreaDto(Guid AreaId, string AreaName);
 public sealed record UserFilterDto
 {
     public Guid? RoleId { get; init; }
+    /// <summary>Filter by role NAME — role ids are per-tenant, so a caller wanting "the technicians"
+    /// cannot know the id up front (the technician dropdown needs exactly this).</summary>
+    public string? RoleName { get; init; }
     public bool? IsActive { get; init; }
     public string? Search { get; init; }
+    public string? SortBy { get; init; }
+    public string? SortDir { get; init; }
     public int Page { get; init; } = 1;
     public int PageSize { get; init; } = 25;
 }

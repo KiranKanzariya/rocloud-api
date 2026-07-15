@@ -9,22 +9,23 @@ using ROCloud.Domain.Enums;
 namespace ROCloud.Application.Features.Invoices.Commands.SendInvoice;
 
 /// <summary>
-/// Generates the invoice PDF, stores it, marks the invoice Sent, and emails the link when the
-/// customer has an email (and email is enabled). Returns the stored PDF path and whether an email
+/// Renders the invoice PDF, marks the invoice Sent, and emails it to the customer (when they have an
+/// email and email is enabled). The PDF is never written to disk — it travels as the email attachment
+/// and is re-rendered from the invoice row whenever it is downloaded again. Returns whether an email
 /// actually went out, so the UI can tell the owner honestly (nothing is sent to a customer with no
 /// email on file). WhatsApp delivery is future scope (Phase 14).
 /// </summary>
 public sealed record SendInvoiceCommand(Guid Id) : IRequest<SendInvoiceResult>;
 
-/// <summary>Outcome of <see cref="SendInvoiceCommand"/> — the stored PDF path and whether it was emailed.</summary>
-public sealed record SendInvoiceResult(string PdfPath, bool Emailed);
+/// <summary>Outcome of <see cref="SendInvoiceCommand"/> — whether the invoice was emailed.</summary>
+public sealed record SendInvoiceResult(bool Emailed);
 
 public class SendInvoiceCommandHandler : IRequestHandler<SendInvoiceCommand, SendInvoiceResult>
 {
     private readonly IAppDbContext _db;
     private readonly ITenantContext _tenant;
     private readonly IInvoicePdfGenerator _pdf;
-    private readonly IFileStorage _storage;
+    private readonly IInvoiceLinkSigner _links;
     private readonly IEmailService _email;
     private readonly IEmailBrandContext _brand;
     private readonly INotificationTemplateRenderer _templates;
@@ -32,14 +33,14 @@ public class SendInvoiceCommandHandler : IRequestHandler<SendInvoiceCommand, Sen
     private readonly IAppSettings _settings;
 
     public SendInvoiceCommandHandler(
-        IAppDbContext db, ITenantContext tenant, IInvoicePdfGenerator pdf, IFileStorage storage,
+        IAppDbContext db, ITenantContext tenant, IInvoicePdfGenerator pdf, IInvoiceLinkSigner links,
         IEmailService email, IEmailBrandContext brand, INotificationTemplateRenderer templates,
         ILogger<SendInvoiceCommandHandler> logger, IAppSettings settings)
     {
         _db = db;
         _tenant = tenant;
         _pdf = pdf;
-        _storage = storage;
+        _links = links;
         _email = email;
         _brand = brand;
         _templates = templates;
@@ -56,22 +57,23 @@ public class SendInvoiceCommandHandler : IRequestHandler<SendInvoiceCommand, Sen
         var bytes = _pdf.Generate(model);
 
         var fileName = $"{invoice.InvoiceNumber}.pdf";
-        await using var stream = new MemoryStream(bytes);
-        var path = await _storage.UploadAsync(stream, "application/pdf", _tenant.TenantId, "invoices", fileName, ct);
 
-        invoice.PdfUrl = path;
         if (invoice.Status == InvoiceStatus.Draft)
             invoice.Status = InvoiceStatus.Sent;
         await _db.SaveChangesAsync(ct);
 
         var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == invoice.CustomerId, ct);
-        var downloadUrl = _storage.GetDownloadUrl(path, TimeSpan.FromDays(_settings.InvoiceLinkExpiryDays));
 
-        // The PDF is always generated, stored and the invoice marked Sent above; the customer email
-        // is gated separately so v1 can keep invoices downloadable while sending nothing out.
+        // The invoice is always rendered and marked Sent above; the customer email is gated separately
+        // so v1 can keep invoices downloadable while sending nothing out.
         var emailed = false;
         if (_settings.InvoiceSentEnabled && _settings.EmailEnabled && !string.IsNullOrWhiteSpace(customer?.Email))
         {
+            // The customer has no login, so the link is a signed, expiring token that re-renders the
+            // PDF on demand (nothing is stored to serve).
+            var downloadUrl = _links.CreateDownloadUrl(
+                _tenant.TenantId, invoice.Id, TimeSpan.FromDays(_settings.InvoiceLinkExpiryDays));
+
             var tokens = new Dictionary<string, string>
             {
                 ["CustomerName"] = customer!.Name,
@@ -82,9 +84,9 @@ public class SendInvoiceCommandHandler : IRequestHandler<SendInvoiceCommand, Sen
             var rendered = await _templates.RenderAsync(
                 _tenant.TenantId, "invoice_sent", customer.PreferredLanguage, "Email", tokens, ct);
             var subject = rendered?.Subject ?? $"Invoice {invoice.InvoiceNumber}";
-            // The PDF now travels as an attachment (below), so the default body references the
-            // attachment instead of a link. Tenant overrides may still use {{DownloadUrl}} — that
-            // token is kept populated for backward compatibility.
+            // The PDF travels as an attachment (below), so the default body references the attachment
+            // rather than the link. Tenant overrides may still use {{DownloadUrl}} — that token stays
+            // populated, and now points at the re-render endpoint.
             var body = rendered?.Body
                        ?? $"Hi {customer!.Name}, your invoice {invoice.InvoiceNumber} is attached to this email. Thank you.";
 
@@ -103,6 +105,6 @@ public class SendInvoiceCommandHandler : IRequestHandler<SendInvoiceCommand, Sen
         _logger.LogInformation(
             "TODO[Phase14]: WhatsApp invoice {InvoiceNumber} to {Mobile}", invoice.InvoiceNumber, customer?.Mobile);
 
-        return new SendInvoiceResult(path, emailed);
+        return new SendInvoiceResult(emailed);
     }
 }

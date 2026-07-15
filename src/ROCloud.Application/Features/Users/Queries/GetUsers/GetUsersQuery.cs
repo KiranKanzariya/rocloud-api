@@ -24,10 +24,16 @@ public class GetUsersQueryHandler : IRequestHandler<GetUsersQuery, PagedResult<U
         IQueryable<User> query = _db.Users;
 
         if (f.RoleId is { } roleId) query = query.Where(u => u.RoleId == roleId);
+        if (!string.IsNullOrWhiteSpace(f.RoleName))
+        {
+            var roleName = f.RoleName.Trim();
+            query = query.Where(u => u.Role != null && u.Role.Name == roleName);
+        }
         if (f.IsActive is { } isActive) query = query.Where(u => u.IsActive == isActive);
         if (!string.IsNullOrWhiteSpace(f.Search))
         {
-            var s = f.Search.ToLower();
+            // Trim: a pasted or autocompleted "ramesh " would otherwise match nothing at all.
+            var s = f.Search.Trim().ToLower();
             query = query.Where(u =>
                 u.Name.ToLower().Contains(s) ||
                 (u.Email != null && u.Email.ToLower().Contains(s)) ||
@@ -36,8 +42,26 @@ public class GetUsersQueryHandler : IRequestHandler<GetUsersQuery, PagedResult<U
 
         var total = await query.CountAsync(ct);
 
+        var descending = string.Equals(f.SortDir, "desc", StringComparison.OrdinalIgnoreCase);
+        IOrderedQueryable<User> ordered = (f.SortBy?.ToLowerInvariant()) switch
+        {
+            "email" => descending ? query.OrderByDescending(u => u.Email) : query.OrderBy(u => u.Email),
+            "rolename" => descending
+                ? query.OrderByDescending(u => u.Role!.Name)
+                : query.OrderBy(u => u.Role!.Name),
+            "lastloginat" => descending
+                ? query.OrderByDescending(u => u.LastLoginAt)
+                : query.OrderBy(u => u.LastLoginAt),
+            "isactive" => descending
+                ? query.OrderByDescending(u => u.IsActive)
+                : query.OrderBy(u => u.IsActive),
+            _ => descending ? query.OrderByDescending(u => u.Name) : query.OrderBy(u => u.Name)
+        };
+        // Roles, statuses and even names repeat, and LastLoginAt is null for anyone who's never logged
+        // in — all big ties. A unique final key keeps the order stable and pagination correct.
+        query = ordered.ThenBy(u => u.Id);
+
         var items = await query
-            .OrderBy(u => u.Name)
             .Skip((page - 1) * pageSize).Take(pageSize)
             .Select(u => new UserListItemDto(
                 u.Id,

@@ -75,8 +75,7 @@ public class RenewSubscriptionCommandHandler : IRequestHandler<RenewSubscription
             var freeInvoice = await SubscriptionInvoiceFactory.BuildAsync(
                 _db, tenant, plan, cycle, DateOnly.FromDateTime(freeBasis), SubscriptionInvoiceStatus.Paid,
                 $"{plan.Name} plan — 1 {unit} (free renewal)", ct);
-            _db.SubscriptionInvoices.Add(freeInvoice);
-            await _delivery.StorePdfAsync(freeInvoice, tenant, ct);   // downloadable PDF, no email
+            _db.SubscriptionInvoices.Add(freeInvoice);   // no email; its PDF renders on demand
             tenant.SubscriptionEndsAt = yearly ? freeBasis.AddYears(1) : freeBasis.AddMonths(1);
             tenant.Status = TenantStatus.Active;
             await _db.SaveChangesAsync(ct);
@@ -89,7 +88,7 @@ public class RenewSubscriptionCommandHandler : IRequestHandler<RenewSubscription
             $"{plan.Name} plan — 1 {unit} renewal", ct);
         _db.SubscriptionInvoices.Add(invoice);
 
-        // Store the PDF (sets PdfUrl) and email the owner (best-effort) — same as the job path.
+        // Email the owner the invoice (best-effort) — same as the job path.
         await _delivery.IssueAsync(invoice, tenant, ct);
 
         await _db.SaveChangesAsync(ct);
@@ -102,5 +101,5 @@ public class RenewSubscriptionCommandHandler : IRequestHandler<RenewSubscription
     private static SubscriptionInvoiceDto Map(Domain.Entities.Platform.SubscriptionInvoice i) => new(
         i.Id, i.InvoiceNumber, i.PlanType, i.BillingCycle,
         i.PeriodStart, i.PeriodEnd, i.GrossAmount, i.DiscountAmount, i.Amount,
-        i.Status, i.DueDate, i.Description, i.PaidAt, i.PdfUrl != null);
+        i.Status, i.DueDate, i.Description, i.PaidAt);
 }

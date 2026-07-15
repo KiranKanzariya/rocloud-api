@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
 using ROCloud.Application.Features.Invoices.Dtos;
-using ROCloud.Application.Features.Payments;
+using ROCloud.Domain.Enums;
 
 namespace ROCloud.Application.Features.Invoices.Queries.GetInvoiceById;
 
@@ -26,13 +26,14 @@ public class GetInvoiceByIdQueryHandler : IRequestHandler<GetInvoiceByIdQuery, I
         var to = invoice.PeriodTo ?? invoice.InvoiceDate;
         var lines = await InvoiceLineBuilder.BuildAsync(_db, invoice.CustomerId, from, to, ct);
 
-        // Payments the owner recorded against the customer rather than this invoice still settle it —
-        // FIFO, oldest obligation first. Report the resolved money, and how much of it came that way.
-        var allocations = (await CustomerObligationAllocator.ComputeAsync(
-            _db, new[] { invoice.CustomerId }, ct)).Invoices;
-        var allocated = allocations.GetValueOrDefault(invoice.Id, 0m);
-        var (paidAmount, balance, status) = InvoicePaymentStatus.Resolve(
-            invoice.Status, invoice.TotalAmount, invoice.PaidAmount, allocated);
+        // PaidAmount is maintained on write and already includes money the owner recorded against the
+        // customer rather than this invoice. Those payments carry no link to it, so they will not
+        // appear in its payment list — work out how much came that way and say so on the page, rather
+        // than showing a "Paid" invoice with no receipts against it.
+        var linked = await _db.Payments
+            .Where(p => p.InvoiceId == invoice.Id && p.Status == PaymentStatus.Completed)
+            .SumAsync(p => (decimal?)p.Amount, ct) ?? 0m;
+        var allocated = Math.Max(0m, invoice.PaidAmount - linked);
 
         return new InvoiceDto(
             invoice.Id,
@@ -48,13 +49,12 @@ public class GetInvoiceByIdQueryHandler : IRequestHandler<GetInvoiceByIdQuery, I
             invoice.TaxAmount,
             invoice.Discount,
             invoice.TotalAmount,
-            paidAmount,
-            balance,
+            invoice.PaidAmount,
+            invoice.TotalAmount - invoice.PaidAmount,
             allocated,
-            status.ToString(),
+            invoice.Status.ToString(),
             invoice.GstNumber,
             invoice.Notes,
-            invoice.PdfUrl,
             invoice.CreatedAt,
             lines);
     }

@@ -102,7 +102,14 @@ public class ReconcilePaymentsCommandHandler : IRequestHandler<ReconcilePayments
         }
 
         if (completed + failed + duplicates > 0)
+        {
             await _db.SaveChangesAsync(ct);
+
+            // Some of these payments just became real (Completed) and some just died (Failed). Either
+            // way the customers' invoices must be re-settled — SyncAsync demotes as well as promotes.
+            foreach (var customerId in pending.Select(p => p.CustomerId).Distinct())
+                await Payments.InvoiceAllocationSync.SyncAsync(_db, customerId, ct);
+        }
 
         return new ReconcilePaymentsResult(completed, failed, duplicates, stillPending);
     }

@@ -135,6 +135,11 @@ public class UpdateDeliveryStatusCommandHandler : IRequestHandler<UpdateDelivery
         }
 
         await _db.SaveChangesAsync(ct);
+
+        // Delivering changes what the customer owes in two ways at once: the order becomes an
+        // obligation, and any doorstep cash becomes a payment. Re-settle their invoices against both.
+        if (delivery.Order?.CustomerId is { } deliveredFor)
+            await Payments.InvoiceAllocationSync.SyncAsync(_db, deliveredFor, ct);
     }
 
     private async Task ApplyDeliveredAsync(

@@ -10,8 +10,8 @@ namespace ROCloud.Application.Features.NotificationTemplates.Queries.GetNotifica
 /// (templateCode, languageCode, channel) the tenant's own override if it exists, otherwise the shared
 /// system default (tenant_id NULL). This mirrors the send-path precedence in
 /// INotificationTemplateRenderer, so a non-technical owner sees the working default pre-filled and
-/// only creates an override when they actually edit one. Platform-only templates (rendered with
-/// tenant_id NULL only, e.g. subscription_expiry) are hidden.
+/// only creates an override when they actually edit one. Templates the PLATFORM sends to the tenant
+/// (welcome, password_reset, subscription_*) are hidden — see <see cref="PlatformTemplates"/>.
 /// </summary>
 public sealed record GetNotificationTemplatesQuery(string? Channel = null)
     : IRequest<IReadOnlyList<NotificationTemplateDto>>;
@@ -19,8 +19,7 @@ public sealed record GetNotificationTemplatesQuery(string? Channel = null)
 public class GetNotificationTemplatesQueryHandler
     : IRequestHandler<GetNotificationTemplatesQuery, IReadOnlyList<NotificationTemplateDto>>
 {
-    /// <summary>Templates the platform sends to the tenant owner, not the tenant to its customers — hidden here.</summary>
-    private static readonly string[] PlatformOnlyCodes = ["subscription_expiry"];
+    private static readonly string[] PlatformOnlyCodes = PlatformTemplates.Codes;
 
     private readonly IAppDbContext _db;
     private readonly ITenantContext _tenant;

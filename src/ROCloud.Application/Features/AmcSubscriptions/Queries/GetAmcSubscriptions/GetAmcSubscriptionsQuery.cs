@@ -32,7 +32,8 @@ public class GetAmcSubscriptionsQueryHandler
         var total = await query.CountAsync(ct);
 
         var items = await query
-            .OrderBy(s => s.NextDueDate).ThenByDescending(s => s.CreatedAt)
+            // Id tiebreaker: NextDueDate + CreatedAt still isn't unique, so add a stable final key.
+            .OrderBy(s => s.NextDueDate).ThenByDescending(s => s.CreatedAt).ThenBy(s => s.Id)
             .Skip((page - 1) * pageSize).Take(pageSize)
             .Select(s => new AmcSubscriptionListItemDto(
                 s.Id,
