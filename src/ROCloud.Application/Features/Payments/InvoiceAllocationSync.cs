@@ -26,34 +26,43 @@ namespace ROCloud.Application.Features.Payments;
 /// </summary>
 public static class InvoiceAllocationSync
 {
+    /// <summary>
+    /// Recomputes one customer's invoice allocations AND persists them. Use from single-customer write
+    /// paths (payment collected, delivery marked, opening balance set, one invoice generated).
+    /// </summary>
     public static async Task SyncAsync(IAppDbContext db, Guid customerId, CancellationToken ct)
+    {
+        await SyncWithoutSaveAsync(db, customerId, ct);
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Recomputes one customer's invoice allocations, mutating the tracked <see cref="Domain.Entities.Tenant.Invoice"/>
+    /// entities but NOT saving. Callers that process many customers in a loop (bulk invoice generation,
+    /// payment reconciliation, the nightly re-settle job) should call this per customer and then
+    /// <c>SaveChangesAsync</c> ONCE after the loop — one transaction instead of one per customer.
+    ///
+    /// All database reads happen up front, before any entity is mutated, so a read failure leaves the
+    /// change tracker clean for this customer — a loop caller can catch it, skip the customer, and still
+    /// safely save the customers that succeeded.
+    /// </summary>
+    public static async Task SyncWithoutSaveAsync(IAppDbContext db, Guid customerId, CancellationToken ct)
     {
         var invoices = await db.Invoices
             .Where(i => i.CustomerId == customerId && i.Status != InvoiceStatus.Cancelled)
             .ToListAsync(ct);
+
+        if (invoices.Count == 0) return;
 
         var payments = await db.Payments
             .Where(p => p.CustomerId == customerId && p.Status == PaymentStatus.Completed)
             .Select(p => new { p.Amount, p.InvoiceId })
             .ToListAsync(ct);
 
-        if (invoices.Count == 0) return;
-
-        // 1) Start from money booked directly against each invoice, capped at what it is worth. The
-        //    surplus of an over-payment is deliberately left over, to be spent on the customer's other
-        //    dues below rather than stranded on a settled row.
-        foreach (var invoice in invoices)
-        {
-            var linked = payments.Where(p => p.InvoiceId == invoice.Id).Sum(p => p.Amount);
-            invoice.PaidAmount = Math.Min(linked, invoice.TotalAmount);
-        }
-
-        // 2) Everything else the customer has paid is free to settle whatever they owe.
-        var pool = Math.Max(0m, payments.Sum(p => p.Amount) - invoices.Sum(i => i.PaidAmount));
-
-        // 3) Delivered orders not covered by an invoice period compete for that same pool, so an order
-        //    older than an invoice is settled first. Their share is NOT stored (orders carry no paid
-        //    column) — it is recomputed identically at read time from the pool this leaves behind.
+        // Delivered orders not covered by an invoice period compete for the leftover pool (step 3). Read
+        // it here, alongside the other reads and BEFORE any mutation below, so nothing is left half-applied
+        // if a read throws. Its predicate reads only invoice existence/period/status (never PaidAmount),
+        // and tracked mutations are not flushed until save, so ordering it first changes no result.
         var orders = await db.Orders
             .Where(o => o.CustomerId == customerId
                 && o.Status == OrderStatus.Delivered
@@ -70,6 +79,21 @@ public static class InvoiceAllocationSync
             })
             .ToListAsync(ct);
 
+        // 1) Start from money booked directly against each invoice, capped at what it is worth. The
+        //    surplus of an over-payment is deliberately left over, to be spent on the customer's other
+        //    dues below rather than stranded on a settled row.
+        foreach (var invoice in invoices)
+        {
+            var linked = payments.Where(p => p.InvoiceId == invoice.Id).Sum(p => p.Amount);
+            invoice.PaidAmount = Math.Min(linked, invoice.TotalAmount);
+        }
+
+        // 2) Everything else the customer has paid is free to settle whatever they owe.
+        var pool = Math.Max(0m, payments.Sum(p => p.Amount) - invoices.Sum(i => i.PaidAmount));
+
+        // 3) Delivered orders not covered by an invoice period compete for that same pool, so an order
+        //    older than an invoice is settled first (loaded above). Their share is NOT stored (orders
+        //    carry no paid column) — it is recomputed identically at read time from the pool this leaves.
         var ladder = invoices
             .Select(i => (
                 Date: i.InvoiceDate,
@@ -104,7 +128,5 @@ public static class InvoiceAllocationSync
                         ? InvoiceStatus.Sent          // was paid, no longer is → owed again
                         : invoice.Status;
         }
-
-        await db.SaveChangesAsync(ct);
     }
 }

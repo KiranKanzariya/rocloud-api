@@ -12,6 +12,7 @@ public class ProductConfiguration : IEntityTypeConfiguration<Product>
 
         b.Property(p => p.Name).HasMaxLength(200);
         b.Property(p => p.Unit).HasMaxLength(20);
+        b.Property(p => p.Hsn).HasMaxLength(8);
         b.Property(p => p.DefaultRate).HasPrecision(10, 2);
         b.Property(p => p.BottleSize)
             .HasConversion(EnumConverters.BottleSizeConverter)

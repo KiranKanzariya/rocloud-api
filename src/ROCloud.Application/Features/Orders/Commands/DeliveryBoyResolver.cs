@@ -14,14 +14,25 @@ internal static class DeliveryBoyResolver
 {
     public const string DeliveryBoyRole = "DeliveryBoy";
 
-    public static async Task<Guid?> ResolveAsync(IAppDbContext db, Guid? areaId, CancellationToken ct)
-    {
-        // Active delivery boys for this tenant (query filter scopes to the tenant).
-        var deliveryBoyIds = await db.Users
+    /// <summary>
+    /// Active delivery-boy user ids for the current tenant (query filter scopes to the tenant). Load once
+    /// and pass to the batch <see cref="ResolveAsync(IAppDbContext, Guid?, IReadOnlyList{Guid}, CancellationToken)"/>
+    /// overload when resolving many orders, instead of re-querying this identical list per order.
+    /// </summary>
+    public static Task<List<Guid>> GetActiveDeliveryBoyIdsAsync(IAppDbContext db, CancellationToken ct) =>
+        db.Users
             .Where(u => u.IsActive && u.Role != null && u.Role.Name == DeliveryBoyRole)
             .Select(u => u.Id)
             .ToListAsync(ct);
 
+    /// <summary>Single-order convenience: loads the delivery-boy list, then resolves against it.</summary>
+    public static async Task<Guid?> ResolveAsync(IAppDbContext db, Guid? areaId, CancellationToken ct)
+        => await ResolveAsync(db, areaId, await GetActiveDeliveryBoyIdsAsync(db, ct), ct);
+
+    /// <summary>Batch overload: resolves using a pre-loaded delivery-boy id list (no per-call user query).</summary>
+    public static async Task<Guid?> ResolveAsync(
+        IAppDbContext db, Guid? areaId, IReadOnlyList<Guid> deliveryBoyIds, CancellationToken ct)
+    {
         if (deliveryBoyIds.Count == 0)
             return null;
 

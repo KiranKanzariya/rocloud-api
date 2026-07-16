@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
@@ -124,7 +125,22 @@ public static class DependencyInjection
         // File storage — local disk (v1), behind IFileStorage (guide §4b). Swap to S3/Supabase later.
         // Used for delivery-proof photos only; invoice PDFs are never stored (rendered on demand).
         services.AddHttpContextAccessor();
-        services.AddDataProtection();
+
+        // Persist the Data Protection key ring to a STABLE location. The signed invoice- and
+        // file-download links (which stand in for authentication for logged-out customers) are protected
+        // with these keys; under the default provider hosted in-process on IIS the keys can be lost on an
+        // app-pool recycle/redeploy, silently invalidating every outstanding link. Path comes from
+        // DataProtection:KeysPath, defaulting to a per-machine folder OUTSIDE the deploy directory so it
+        // survives redeploys; SetApplicationName keeps the purpose string stable across rehosting.
+        var keysPath = configuration["DataProtection:KeysPath"];
+        if (string.IsNullOrWhiteSpace(keysPath))
+            keysPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "ROCloud", "DataProtection-Keys");
+        services.AddDataProtection()
+            .SetApplicationName("ROCloud")
+            .PersistKeysToFileSystem(new DirectoryInfo(keysPath));
+
         services.AddScoped<IFileStorage, LocalFileStorage>();
 
         // Signs the expiring invoice-download links emailed to customers (they have no login).

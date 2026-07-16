@@ -11,6 +11,8 @@ public class Product : BaseEntity, ITenantEntity
     public BottleSize BottleSize { get; set; }
     public decimal DefaultRate { get; set; }
     public string Unit { get; set; } = "bottle";
+    /// <summary>HSN (goods) / SAC (services) code for GST tax invoices. Null → falls back to packaged-water HSN 2201.</summary>
+    public string? Hsn { get; set; }
     public bool IsActive { get; set; } = true;
 
     // Navigation

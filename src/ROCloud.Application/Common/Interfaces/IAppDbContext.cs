@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using ROCloud.Domain.Entities.Platform;
 using ROCloud.Domain.Entities.Tenant;
 
@@ -46,4 +47,23 @@ public interface IAppDbContext
     DbSet<ReminderLog> ReminderLogs { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// True when the provider is a real relational database (false for the in-memory test store). Gate
+    /// transaction/savepoint use on this so non-relational providers keep their per-command behaviour.
+    /// </summary>
+    bool IsRelational { get; }
+
+    /// <summary>
+    /// Begins a database transaction so a multi-step write flow can commit once (and, where the provider
+    /// supports them, use savepoints). Relational providers only — gate on <see cref="IsRelational"/>.
+    /// </summary>
+    Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Detaches all tracked entities. Call after rolling a transaction back to a savepoint so the change
+    /// tracker no longer holds the rolled-back inserts/updates that would otherwise be re-applied on the
+    /// next save.
+    /// </summary>
+    void ClearChangeTracker();
 }

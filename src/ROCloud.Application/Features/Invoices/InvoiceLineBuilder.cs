@@ -24,11 +24,12 @@ internal static class InvoiceLineBuilder
                         && i.Order.Status == OrderStatus.Delivered
                         && i.Order.OrderDate >= from
                         && i.Order.OrderDate <= to)
-            .GroupBy(i => new { i.ProductId, ProductName = i.Product!.Name, i.Product.BottleSize, i.UnitRate })
+            .GroupBy(i => new { i.ProductId, ProductName = i.Product!.Name, i.Product.BottleSize, i.Product.Hsn, i.UnitRate })
             .Select(g => new
             {
                 g.Key.ProductName,
                 g.Key.BottleSize,
+                g.Key.Hsn,
                 g.Key.UnitRate,
                 Quantity = g.Sum(x => x.Quantity),
                 Amount = g.Sum(x => x.Quantity * x.UnitRate)
@@ -42,7 +43,8 @@ internal static class InvoiceLineBuilder
                 r.BottleSize.ToWire(),
                 r.Quantity,
                 r.UnitRate,
-                r.Amount))
+                r.Amount,
+                r.Hsn))
             .ToList();
     }
 }

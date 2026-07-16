@@ -20,6 +20,6 @@ public class GetProductByIdQueryHandler : IRequestHandler<GetProductByIdQuery, P
         var p = await _db.Products.FirstOrDefaultAsync(x => x.Id == request.Id, ct)
                 ?? throw new NotFoundException("Product", request.Id);
 
-        return new ProductDto(p.Id, p.Name, p.BottleSize.ToWire(), p.DefaultRate, p.Unit, p.IsActive, p.CreatedAt);
+        return new ProductDto(p.Id, p.Name, p.BottleSize.ToWire(), p.DefaultRate, p.Unit, p.Hsn, p.IsActive, p.CreatedAt);
     }
 }

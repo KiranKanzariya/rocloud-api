@@ -23,10 +23,10 @@ public class GetProductsQueryHandler : IRequestHandler<GetProductsQuery, IReadOn
 
         var rows = await query
             .OrderBy(p => p.Name)
-            .Select(p => new { p.Id, p.Name, p.BottleSize, p.DefaultRate, p.Unit, p.IsActive, p.CreatedAt })
+            .Select(p => new { p.Id, p.Name, p.BottleSize, p.DefaultRate, p.Unit, p.Hsn, p.IsActive, p.CreatedAt })
             .ToListAsync(ct);
 
         return rows.Select(p => new ProductDto(
-            p.Id, p.Name, p.BottleSize.ToWire(), p.DefaultRate, p.Unit, p.IsActive, p.CreatedAt)).ToList();
+            p.Id, p.Name, p.BottleSize.ToWire(), p.DefaultRate, p.Unit, p.Hsn, p.IsActive, p.CreatedAt)).ToList();
     }
 }

@@ -49,7 +49,10 @@ public class InvoiceAllocationSyncJob
             {
                 try
                 {
-                    await InvoiceAllocationSync.SyncAsync(db, customerId, token);
+                    // Compute-only: mutate the tracked invoices without saving. Reads happen before any
+                    // mutation, so a failure here leaves this customer's changes unmade — the rest of the
+                    // tenant still saves cleanly below.
+                    await InvoiceAllocationSync.SyncWithoutSaveAsync(db, customerId, token);
                     synced++;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
@@ -61,8 +64,19 @@ public class InvoiceAllocationSyncJob
                 }
             }
 
-            _logger.LogInformation(
-                "InvoiceAllocationSync: tenant {TenantId} re-settled {Count} customer(s)", tenantId, synced);
+            // Persist the whole tenant's re-settlement in one transaction rather than a save per customer.
+            try
+            {
+                await db.SaveChangesAsync(token);
+                _logger.LogInformation(
+                    "InvoiceAllocationSync: tenant {TenantId} re-settled {Count} customer(s)", tenantId, synced);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex,
+                    "InvoiceAllocationSync: tenant {TenantId} save failed ({Count} customer(s) re-settled in memory)",
+                    tenantId, synced);
+            }
         }, ct);
     }
 }

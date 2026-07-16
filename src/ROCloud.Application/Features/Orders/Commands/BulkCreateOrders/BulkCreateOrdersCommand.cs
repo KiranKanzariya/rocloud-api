@@ -49,6 +49,14 @@ public class BulkCreateOrdersCommandHandler : IRequestHandler<BulkCreateOrdersCo
                 .ToListAsync(ct))
             .ToHashSet();
 
+        // Resolve the delivery-boy assignment once per area, not once per subscription: the active
+        // delivery-boy list is identical for the whole run, and areas repeat heavily across customers.
+        // Nothing is saved until after the loop, so the "most recently served this area" lookup sees the
+        // same DB state on every call — caching per area yields identical results to the original.
+        var deliveryBoyIds = await DeliveryBoyResolver.GetActiveDeliveryBoyIdsAsync(_db, ct);
+        var firstBoy = deliveryBoyIds.Count > 0 ? deliveryBoyIds[0] : (Guid?)null;
+        var boyByArea = new Dictionary<Guid, Guid?>();
+
         var considered = 0;
         var created = 0;
         var skipped = 0;
@@ -71,9 +79,17 @@ public class BulkCreateOrdersCommandHandler : IRequestHandler<BulkCreateOrdersCo
                 ? DeliveryMode.PlantPickup
                 : DeliveryMode.HomeDelivery;
             // Plant-pickup orders collect from the plant — no delivery boy / route assignment.
-            var deliveryBoyId = orderMode == DeliveryMode.PlantPickup
-                ? null
-                : await DeliveryBoyResolver.ResolveAsync(_db, sub.Customer.AreaId, ct);
+            Guid? deliveryBoyId;
+            if (orderMode == DeliveryMode.PlantPickup)
+                deliveryBoyId = null;
+            else if (sub.Customer.AreaId is { } areaId)
+            {
+                if (!boyByArea.TryGetValue(areaId, out deliveryBoyId))
+                    boyByArea[areaId] = deliveryBoyId =
+                        await DeliveryBoyResolver.ResolveAsync(_db, areaId, deliveryBoyIds, ct);
+            }
+            else
+                deliveryBoyId = firstBoy;   // no area → same fallback ResolveAsync uses (first active boy)
 
             var order = new Order
             {

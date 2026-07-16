@@ -5,6 +5,7 @@ using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
 using ROCloud.Application.Common.Sanitisation;
 using ROCloud.Application.Common.Settings;
+using ROCloud.Application.Services;
 using ROCloud.Domain.Entities.Tenant;
 using ROCloud.Domain.Enums;
 using ValidationException = ROCloud.Application.Common.Exceptions.ValidationException;
@@ -117,11 +118,6 @@ public class GenerateInvoiceCommandHandler : IRequestHandler<GenerateInvoiceComm
     }
 
     /// <summary>INV-YYYYMM-NNNN, sequential per tenant per month (incl. soft-deleted so numbers aren't reused).</summary>
-    private async Task<string> NextInvoiceNumberAsync(DateOnly invoiceDate, CancellationToken ct)
-    {
-        var prefix = $"INV-{invoiceDate:yyyyMM}-";
-        var countThisMonth = await _db.Invoices.IgnoreQueryFilters()
-            .CountAsync(i => i.TenantId == _tenant.TenantId && i.InvoiceNumber.StartsWith(prefix), ct);
-        return $"{prefix}{countThisMonth + 1:D4}";
-    }
+    private Task<string> NextInvoiceNumberAsync(DateOnly invoiceDate, CancellationToken ct)
+        => InvoiceNumberGenerator.NextAsync(_db, _tenant.TenantId, invoiceDate, ct);
 }

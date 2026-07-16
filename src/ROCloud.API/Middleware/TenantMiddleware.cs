@@ -7,9 +7,12 @@ using ROCloud.Domain.Enums;
 namespace ROCloud.API.Middleware;
 
 /// <summary>
-/// Resolves the current tenant (X-Tenant header → subdomain → JWT tenant_id claim),
-/// validates its status, and populates the scoped ITenantContext. Runs AFTER
-/// authentication so the JWT claim is available. Auth/health/swagger paths are skipped.
+/// Resolves the current tenant, validates its status, and populates the scoped ITenantContext. Runs
+/// AFTER authentication so the JWT is available. For an authenticated caller the JWT <c>tenant_id</c>
+/// claim is authoritative — an X-Tenant header / host subdomain may only agree with it, and one that
+/// names a different tenant is rejected (403 TENANT_MISMATCH) rather than honoured, so a valid token
+/// cannot be used to reach another tenant's data. Unauthenticated requests fall back to header →
+/// subdomain. Auth/health/swagger/platform paths are skipped.
 /// </summary>
 public class TenantMiddleware
 {
@@ -43,7 +46,18 @@ public class TenantMiddleware
             return;
         }
 
-        var tenant = await ResolveTenantAsync(context, db);
+        var (tenant, mismatch) = await ResolveTenantAsync(context, db);
+
+        // An authenticated caller whose JWT names one tenant may not act on another by supplying a
+        // different X-Tenant header / host subdomain — that would bypass tenant isolation (the EF query
+        // filter and the RLS session GUC both key off the resolved tenant). Reject the attempt.
+        if (mismatch)
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsJsonAsync(new { error = "Tenant mismatch.", code = "TENANT_MISMATCH" });
+            return;
+        }
+
         if (tenant is not null)
         {
             // Blocked tenants may still hit the billing endpoints to pay and restore access (guide §25).
@@ -102,12 +116,47 @@ public class TenantMiddleware
         await _next(context);
     }
 
-    private static async Task<Tenant?> ResolveTenantAsync(HttpContext context, IAppDbContext db)
+    /// <summary>
+    /// Resolves the request's tenant. For an authenticated caller the JWT <c>tenant_id</c> claim is the
+    /// source of truth: an X-Tenant header / host subdomain may only AGREE with it, never override it.
+    /// A header/subdomain that resolves to a different tenant returns <c>Mismatch = true</c> so the
+    /// caller is rejected (isolation-bypass attempt). Unauthenticated tenant-scoped requests (which carry
+    /// no claim to protect) still resolve purely from header → subdomain, as before.
+    /// </summary>
+    private static async Task<(Tenant? Tenant, bool Mismatch)> ResolveTenantAsync(
+        HttpContext context, IAppDbContext db)
     {
-        // 1. X-Tenant header (subdomain sent by the portal)
+        Guid? claimTenantId = Guid.TryParse(context.User.FindFirst("tenant_id")?.Value, out var cid)
+            ? cid
+            : null;
+
+        // Tenant the request ASKS for via header/subdomain (may be null if neither is supplied/known).
+        var requested = await ResolveRequestedTenantAsync(context, db);
+
+        if (claimTenantId is { } tid)
+        {
+            // Authenticated: the claim wins. A header/subdomain naming a *different* tenant is rejected;
+            // one that agrees (or is absent) is fine. Fall back to the claimed tenant when none was asked.
+            if (requested is not null && requested.Id != tid)
+                return (null, true);
+
+            var tenant = requested ?? await db.Tenants.AsNoTracking().Include(t => t.Plan)
+                .FirstOrDefaultAsync(t => t.Id == tid);
+            return (tenant, false);
+        }
+
+        // Unauthenticated: no claim to protect — trust header/subdomain (login/register/etc. are excluded).
+        return (requested, false);
+    }
+
+    /// <summary>Resolves the tenant requested by the X-Tenant header, then the host subdomain.</summary>
+    private static async Task<Tenant?> ResolveRequestedTenantAsync(HttpContext context, IAppDbContext db)
+    {
+        // 1. X-Tenant header (subdomain sent by the portal). Read-only: the middleware only inspects the
+        // tenant to set the request's ITenantContext, so it is never tracked.
         var headerSubdomain = context.Request.Headers["X-Tenant"].FirstOrDefault();
         if (!string.IsNullOrWhiteSpace(headerSubdomain))
-            return await db.Tenants.Include(t => t.Plan)
+            return await db.Tenants.AsNoTracking().Include(t => t.Plan)
                 .FirstOrDefaultAsync(t => t.Subdomain == headerSubdomain);
 
         // 2. Subdomain extracted from the request host
@@ -115,15 +164,10 @@ public class TenantMiddleware
         if (!string.IsNullOrWhiteSpace(label) &&
             !ReservedHostLabels.Contains(label, StringComparer.OrdinalIgnoreCase))
         {
-            var bySubdomain = await db.Tenants.Include(t => t.Plan)
+            var bySubdomain = await db.Tenants.AsNoTracking().Include(t => t.Plan)
                 .FirstOrDefaultAsync(t => t.Subdomain == label);
             if (bySubdomain is not null) return bySubdomain;
         }
-
-        // 3. JWT tenant_id claim
-        if (Guid.TryParse(context.User.FindFirst("tenant_id")?.Value, out var tenantId))
-            return await db.Tenants.Include(t => t.Plan)
-                .FirstOrDefaultAsync(t => t.Id == tenantId);
 
         return null;
     }

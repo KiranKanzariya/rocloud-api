@@ -7,5 +7,6 @@ public sealed record ProductDto(
     string BottleSize,
     decimal DefaultRate,
     string Unit,
+    string? Hsn,
     bool IsActive,
     DateTime CreatedAt);

@@ -10,7 +10,8 @@ public sealed record CreateProductCommand(
     string Name,
     string BottleSize,
     decimal DefaultRate,
-    string? Unit) : IRequest<Guid>;
+    string? Unit,
+    string? Hsn) : IRequest<Guid>;
 
 public class CreateProductCommandValidator : AbstractValidator<CreateProductCommand>
 {
@@ -22,6 +23,7 @@ public class CreateProductCommandValidator : AbstractValidator<CreateProductComm
             .WithMessage("Invalid bottle size. Allowed: 18L, 20L, 250ml, 500ml, 1L, Custom.");
         RuleFor(c => c.DefaultRate).GreaterThanOrEqualTo(0);
         RuleFor(c => c.Unit).MaximumLength(20);
+        RuleFor(c => c.Hsn).MaximumLength(8);
     }
 }
 
@@ -46,6 +48,7 @@ public class CreateProductCommandHandler : IRequestHandler<CreateProductCommand,
             BottleSize = BottleSizeExtensions.FromWire(request.BottleSize)!.Value,
             DefaultRate = request.DefaultRate,
             Unit = string.IsNullOrWhiteSpace(request.Unit) ? "bottle" : request.Unit,
+            Hsn = string.IsNullOrWhiteSpace(request.Hsn) ? null : request.Hsn.Trim(),
             IsActive = true
         };
         _db.Products.Add(product);

@@ -91,10 +91,10 @@ public class SendInvoiceCommandHandler : IRequestHandler<SendInvoiceCommand, Sen
                        ?? $"Hi {customer!.Name}, your invoice {invoice.InvoiceNumber} is attached to this email. Thank you.";
 
             // Customer-facing mail — brand the email header with the tenant's business, not ROCloud.
-            var businessName = await _db.Tenants
-                .Where(t => t.Id == _tenant.TenantId).Select(t => t.Name).FirstOrDefaultAsync(ct);
-            if (!string.IsNullOrWhiteSpace(businessName))
-                _brand.Current = new EmailBrand(businessName);
+            // Reuse the business name the PDF model already loaded (== tenant.Name) rather than
+            // re-querying the tenant row a second time on every send.
+            if (!string.IsNullOrWhiteSpace(model.BusinessName))
+                _brand.Current = new EmailBrand(model.BusinessName);
 
             var attachments = new[] { new EmailAttachment(fileName, bytes, "application/pdf") };
             await _email.SendAsync(customer!.Email!, subject, body, attachments, ct);

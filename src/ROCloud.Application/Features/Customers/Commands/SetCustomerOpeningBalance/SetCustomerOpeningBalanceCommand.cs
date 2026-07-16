@@ -99,12 +99,13 @@ public class SetCustomerOpeningBalanceCommandHandler : IRequestHandler<SetCustom
             await RecordOpeningIssueAsync(jar.ProductId, jar.Quantity, customer.Id, note, ct);
 
         // 2) Money: dues → opening invoice; advance → credit payment.
+        Invoice? openingInvoice = null;
         if (request.OpeningDues > 0)
-            await AddOpeningInvoiceAsync(customer.Id, request.OpeningDues, request.CutoverDate, note, ct);
+            openingInvoice = await AddOpeningInvoiceAsync(customer.Id, request.OpeningDues, request.CutoverDate, note, ct);
         else if (request.OpeningDues < 0)
             AddAdvancePayment(customer.Id, -request.OpeningDues, request.CutoverDate, note);
 
-        await _db.SaveChangesAsync(ct);
+        await SaveSeededRowsAsync(customer.Id, openingInvoice, request.CutoverDate, ct);
 
         // An imported advance must immediately settle the customer's oldest dues; an opening invoice
         // must be settled by any advance they already hold. Either way the invoices need re-stating.
@@ -157,9 +158,40 @@ public class SetCustomerOpeningBalanceCommandHandler : IRequestHandler<SetCustom
         });
     }
 
-    private async Task AddOpeningInvoiceAsync(Guid customerId, decimal amount, DateOnly cutover, string note, CancellationToken ct)
+    /// <summary>
+    /// Persists the seeded rows, resilient to the two ways a concurrent write can clash on save:
+    ///   • the invoice number we minted was taken between read and save → re-mint above the new
+    ///     high-water mark and retry (bounded, so a persistent fault still surfaces);
+    ///   • this customer's opening balance was seeded by another request → raise the guard's clean 400.
+    /// Anything else is a genuine fault and propagates unchanged — we never mask one as "already set".
+    /// </summary>
+    private async Task SaveSeededRowsAsync(Guid customerId, Invoice? openingInvoice, DateOnly cutover, CancellationToken ct)
     {
-        _db.Invoices.Add(new Invoice
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await _db.SaveChangesAsync(ct);
+                return;
+            }
+            catch (DbUpdateException ex) when (openingInvoice is not null
+                                               && attempt < 5
+                                               && InvoiceNumberGenerator.IsDuplicateNumber(ex))
+            {
+                openingInvoice.InvoiceNumber =
+                    await InvoiceNumberGenerator.NextAsync(_db, _tenant.TenantId, cutover, ct);
+            }
+            catch (DbUpdateException)
+            {
+                await GuardNotAlreadySetAsync(customerId, ct); // → clean 400 if already seeded
+                throw;                                          // otherwise a genuine fault
+            }
+        }
+    }
+
+    private async Task<Invoice> AddOpeningInvoiceAsync(Guid customerId, decimal amount, DateOnly cutover, string note, CancellationToken ct)
+    {
+        var invoice = new Invoice
         {
             Id = Guid.NewGuid(),
             TenantId = _tenant.TenantId,
@@ -176,7 +208,9 @@ public class SetCustomerOpeningBalanceCommandHandler : IRequestHandler<SetCustom
             PaidAmount = 0m,
             Status = InvoiceStatus.Sent, // counts toward the customer's owed balance
             Notes = note
-        });
+        };
+        _db.Invoices.Add(invoice);
+        return invoice;
     }
 
     private void AddAdvancePayment(Guid customerId, decimal amount, DateOnly cutover, string note)
@@ -201,11 +235,6 @@ public class SetCustomerOpeningBalanceCommandHandler : IRequestHandler<SetCustom
         return $"{marker} {text}";
     }
 
-    private async Task<string> NextInvoiceNumberAsync(DateOnly invoiceDate, CancellationToken ct)
-    {
-        var prefix = $"INV-{invoiceDate:yyyyMM}-";
-        var countThisMonth = await _db.Invoices.IgnoreQueryFilters()
-            .CountAsync(i => i.TenantId == _tenant.TenantId && i.InvoiceNumber.StartsWith(prefix), ct);
-        return $"{prefix}{countThisMonth + 1:D4}";
-    }
+    private Task<string> NextInvoiceNumberAsync(DateOnly invoiceDate, CancellationToken ct)
+        => InvoiceNumberGenerator.NextAsync(_db, _tenant.TenantId, invoiceDate, ct);
 }

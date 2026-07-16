@@ -46,7 +46,7 @@ public sealed record InvoiceDto(
 
 /// <summary>A reconstructed line item (period deliveries grouped by product).</summary>
 public sealed record InvoiceLineItemDto(
-    string ProductName, string BottleSize, int Quantity, decimal Rate, decimal Amount);
+    string ProductName, string BottleSize, int Quantity, decimal Rate, decimal Amount, string? Hsn = null);
 
 /// <summary>Filter/paging for the invoices list.</summary>
 public sealed record InvoiceFilterDto
@@ -81,7 +81,12 @@ public sealed record InvoicePdfModel(
     decimal SgstAmount,
     decimal Discount,
     decimal TotalAmount,
-    string? Notes);
+    string? Notes,
+    // Document framing + payment state
+    bool IsTaxInvoice,        // GST-registered tenant → "TAX INVOICE" + HSN; else "BILL OF SUPPLY"
+    string Status,            // invoice status (Paid / PartiallyPaid / Sent / Overdue / Cancelled …)
+    decimal PaidAmount,
+    string? BrandColor);      // tenant's brand hex (#RRGGBB) for accents; null → app navy
 
 public sealed record InvoicePdfLine(
     string Description, string Hsn, int Quantity, decimal Rate, decimal Amount);

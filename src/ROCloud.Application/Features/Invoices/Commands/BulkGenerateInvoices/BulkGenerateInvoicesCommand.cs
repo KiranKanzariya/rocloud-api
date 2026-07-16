@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Interfaces;
 using ROCloud.Application.Common.Settings;
+using ROCloud.Application.Services;
 using ROCloud.Domain.Entities.Tenant;
 using ROCloud.Domain.Enums;
 
@@ -49,11 +50,11 @@ public class BulkGenerateInvoicesCommandHandler
         var gstRate = request.GstRate ?? (gst is { GstEnabled: true } ? gst.GstRate : 0m);
         var invoiceDate = DateOnly.FromDateTime(DateTime.UtcNow);
         var dueDate = invoiceDate.AddDays(request.DueInDays ?? _settings.InvoiceDueInDays);
-        var prefix = $"INV-{invoiceDate:yyyyMM}-";
+        var prefix = InvoiceNumberGenerator.Prefix(invoiceDate);
 
-        // One round-trip for the month's current sequence high-water mark.
-        var seq = await _db.Invoices.IgnoreQueryFilters()
-            .CountAsync(i => i.TenantId == _tenant.TenantId && i.InvoiceNumber.StartsWith(prefix), ct);
+        // One round-trip for the month's current sequence high-water mark (MAX suffix, not a row count —
+        // a count re-mints an existing number when there is any gap; see InvoiceNumberGenerator).
+        var seq = await InvoiceNumberGenerator.MaxSeqAsync(_db, _tenant.TenantId, invoiceDate, ct);
 
         // Idempotency guard: customers who already have a non-cancelled invoice for this exact period
         // are skipped, so a re-run (admin "run now", owner re-trigger, retry) never double-bills them.
@@ -114,8 +115,10 @@ public class BulkGenerateInvoicesCommandHandler
 
             // A freshly raised invoice may already be covered by an advance the customer holds, so
             // re-settle each one we billed rather than sending them a demand they have already paid.
+            // Re-settle all of them, then persist in a single transaction (not one save per customer).
             foreach (var customerId in billed)
-                await Payments.InvoiceAllocationSync.SyncAsync(_db, customerId, ct);
+                await Payments.InvoiceAllocationSync.SyncWithoutSaveAsync(_db, customerId, ct);
+            await _db.SaveChangesAsync(ct);
         }
 
         return new BulkInvoiceResultDto(created, customers.Count, skipped);

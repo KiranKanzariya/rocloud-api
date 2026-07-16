@@ -73,6 +73,28 @@ public class ImportCustomersCommandHandler : IRequestHandler<ImportCustomersComm
         // Import only fills up to the tenant's remaining customer headroom (guide §25); the rest is skipped.
         var remaining = await Subscription.PlanLimits.CustomerHeadroomAsync(_db, _tenant, ct);
 
+        // Commit the whole import in ONE transaction on a relational provider (production PostgreSQL), so
+        // it is one commit rather than up to three per row — and atomic (a re-run is safe: existing
+        // mobiles/names are skipped). A savepoint around each step preserves the original best-effort
+        // behaviour: a failed opening balance or subscription rolls back only that step and the customer
+        // still lands. Dry-run writes nothing, and the in-memory test provider is non-relational and has
+        // no savepoints, so both keep the original per-command flow unchanged.
+        var useTransaction = !request.DryRun && _db.IsRelational;
+        await using var tx = useTransaction ? await _db.BeginTransactionAsync(ct) : null;
+        var useSavepoints = tx is { SupportsSavepoints: true };
+
+        const string sp = "import_row_step";
+        async Task BeginStepAsync() { if (useSavepoints) await tx!.CreateSavepointAsync(sp, ct); }
+        async Task CommitStepAsync() { if (useSavepoints) await tx!.ReleaseSavepointAsync(sp, ct); }
+        async Task RollbackStepAsync()
+        {
+            if (!useSavepoints) return;
+            await tx!.RollbackToSavepointAsync(sp, ct);
+            // A savepoint rollback undoes the DB writes but NOT the change tracker — drop the rolled-back
+            // inserts so the next step's SaveChanges doesn't try to re-apply them.
+            _db.ClearChangeTracker();
+        }
+
         for (var i = 0; i < rows.Count; i++)
         {
             var rowNo = i + 2; // 1-based + header row
@@ -141,8 +163,10 @@ public class ImportCustomersCommandHandler : IRequestHandler<ImportCustomersComm
                 continue;
             }
 
-            // Commit: customer first, then opening balance + subscription (best-effort, reported).
+            // Commit: customer first, then opening balance + subscription (best-effort, reported). Each
+            // step is bracketed by a savepoint so a failure rolls back only that step (see helpers above).
             Guid customerId;
+            await BeginStepAsync();
             try
             {
                 customerId = await _mediator.Send(new CreateCustomerCommand(
@@ -150,9 +174,11 @@ public class ImportCustomersCommandHandler : IRequestHandler<ImportCustomersComm
                     NullIfBlank(Get(row, "address_line")), NullIfBlank(Get(row, "landmark")), null, null,
                     parsed.DeliveryMode, parsed.PaymentPreference, parsed.PreferredBottleSize,
                     NullIfBlank(Get(row, "preferred_language")), NullIfBlank(Get(row, "notes"))), ct);
+                await CommitStepAsync();
             }
             catch (ValidationException ex)
             {
+                await RollbackStepAsync();
                 results.Add(new ImportRowResultDto(rowNo, mobile, name, "Failed", Flatten(ex)));
                 failed++;
                 continue;
@@ -162,28 +188,35 @@ public class ImportCustomersCommandHandler : IRequestHandler<ImportCustomersComm
 
             if (parsed.Jars.Count > 0 || parsed.OpeningDues != 0)
             {
+                await BeginStepAsync();
                 try
                 {
                     await _mediator.Send(new SetCustomerOpeningBalanceCommand(
                         customerId, request.CutoverDate, parsed.Jars, parsed.OpeningDues, "Imported from book"), ct);
+                    await CommitStepAsync();
                 }
-                catch (Exception ex) { warnings.Add($"Opening balance skipped: {Message(ex)}"); }
+                catch (Exception ex) { await RollbackStepAsync(); warnings.Add($"Opening balance skipped: {Message(ex)}"); }
             }
 
             if (parsed.Subscription is { } sub)
             {
+                await BeginStepAsync();
                 try
                 {
                     await _mediator.Send(new CreateCustomerSubscriptionCommand(
                         customerId, sub.ProductId, sub.Quantity, sub.Frequency, sub.Rate, sub.StartDate), ct);
+                    await CommitStepAsync();
                 }
-                catch (Exception ex) { warnings.Add($"Subscription skipped: {Message(ex)}"); }
+                catch (Exception ex) { await RollbackStepAsync(); warnings.Add($"Subscription skipped: {Message(ex)}"); }
             }
 
             results.Add(new ImportRowResultDto(rowNo, mobile, name, "Created",
                 warnings.Count > 0 ? string.Join(" ", warnings) : null));
             created++;
         }
+
+        // One commit for the whole import (no-op when there is no transaction — dry-run / in-memory).
+        if (tx is not null) await tx.CommitAsync(ct);
 
         return new ImportCustomersResultDto(request.DryRun, rows.Count, created, skipped, failed, results);
     }

@@ -51,7 +51,7 @@ public class ProductsController : ControllerBase
     public async Task<IActionResult> UpdateProduct(Guid id, [FromBody] UpdateProductRequest body, CancellationToken ct)
     {
         await _mediator.Send(new UpdateProductCommand(
-            id, body.Name, body.BottleSize, body.DefaultRate, body.Unit, body.IsActive), ct);
+            id, body.Name, body.BottleSize, body.DefaultRate, body.Unit, body.Hsn, body.IsActive), ct);
         return Ok(ApiResponse<object>.Ok(new { id }));
     }
 
@@ -65,4 +65,4 @@ public class ProductsController : ControllerBase
 }
 
 public sealed record UpdateProductRequest(
-    string Name, string BottleSize, decimal DefaultRate, string? Unit, bool IsActive);
+    string Name, string BottleSize, decimal DefaultRate, string? Unit, string? Hsn, bool IsActive);

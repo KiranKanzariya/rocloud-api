@@ -1,5 +1,6 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using ROCloud.Application.Common;
 using ROCloud.Application.Common.Interfaces;
 using ROCloud.Application.Features.Deliveries.Dtos;
 using ROCloud.Application.Features.Deliveries.Queries.GetDeliveries;
@@ -18,9 +19,16 @@ public class GetDeliveryBoardQueryHandler : IRequestHandler<GetDeliveryBoardQuer
 
     public async Task<DeliveryBoardDto> Handle(GetDeliveryBoardQuery request, CancellationToken ct)
     {
+        // The board is a single-day operational view. If the caller supplies no date window at all the
+        // query would materialise every delivery ever — so default to today. The owner portal always
+        // sends a date, so this only bounds stray/unfiltered callers (no behaviour change for the portal).
+        var filter = request.Filter;
+        if (filter is { Date: null, FromDate: null, ToDate: null })
+            filter = filter with { Date = AppTimeZone.Today(DateTime.UtcNow) };
+
         // Cancelling an order leaves its delivery row behind as Skipped, so the board must exclude
         // them explicitly — otherwise they resurface as "Delivered" stops or "Awaiting pickup" cards.
-        var query = GetDeliveriesQueryHandler.ApplyFilter(_db.Deliveries, request.Filter)
+        var query = GetDeliveriesQueryHandler.ApplyFilter(_db.Deliveries, filter)
             .Where(d => d.Order == null || d.Order.Status != OrderStatus.Cancelled);
 
         var all = await query

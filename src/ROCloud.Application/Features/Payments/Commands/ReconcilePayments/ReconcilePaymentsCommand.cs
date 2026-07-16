@@ -106,9 +106,11 @@ public class ReconcilePaymentsCommandHandler : IRequestHandler<ReconcilePayments
             await _db.SaveChangesAsync(ct);
 
             // Some of these payments just became real (Completed) and some just died (Failed). Either
-            // way the customers' invoices must be re-settled — SyncAsync demotes as well as promotes.
+            // way the customers' invoices must be re-settled — the sync demotes as well as promotes.
+            // Re-settle every affected customer, then persist once rather than a save per customer.
             foreach (var customerId in pending.Select(p => p.CustomerId).Distinct())
-                await Payments.InvoiceAllocationSync.SyncAsync(_db, customerId, ct);
+                await Payments.InvoiceAllocationSync.SyncWithoutSaveAsync(_db, customerId, ct);
+            await _db.SaveChangesAsync(ct);
         }
 
         return new ReconcilePaymentsResult(completed, failed, duplicates, stillPending);

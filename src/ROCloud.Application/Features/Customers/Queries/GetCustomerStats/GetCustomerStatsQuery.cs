@@ -17,8 +17,13 @@ public class GetCustomerStatsQueryHandler : IRequestHandler<GetCustomerStatsQuer
 
     public async Task<CustomerStatsDto> Handle(GetCustomerStatsQuery request, CancellationToken ct)
     {
-        var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == request.Id, ct)
-                       ?? throw new NotFoundException("Customer", request.Id);
+        // Only the id + creation date are needed — project (no tracking, two columns) rather than
+        // materialising the whole tracked Customer entity for a read-only stats query.
+        var customer = await _db.Customers.AsNoTracking()
+            .Where(c => c.Id == request.Id)
+            .Select(c => new { c.Id, c.CreatedAt })
+            .FirstOrDefaultAsync(ct)
+            ?? throw new NotFoundException("Customer", request.Id);
 
         var lifetimePayments = await _db.Payments
             .Where(p => p.CustomerId == customer.Id && p.Status == PaymentStatus.Completed)

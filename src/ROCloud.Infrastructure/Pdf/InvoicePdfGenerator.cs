@@ -23,11 +23,9 @@ public class InvoicePdfGenerator : IInvoicePdfGenerator
 
                 page.Header().Element(h => Header(h, m));
                 page.Content().Element(c => Content(c, m));
-                page.Footer().AlignCenter().Text(t =>
-                {
-                    t.Span("This is a computer-generated invoice. ").FontSize(8).FontColor(Colors.Grey.Medium);
-                    t.Span("HSN 2201 — packaged drinking water.").FontSize(8).FontColor(Colors.Grey.Medium);
-                });
+                page.Footer().AlignCenter()
+                    .Text($"This is a computer-generated invoice from {m.BusinessName}.")
+                    .FontSize(8).FontColor(Colors.Grey.Medium);
             });
         });
 
@@ -38,7 +36,7 @@ public class InvoicePdfGenerator : IInvoicePdfGenerator
     {
         container.Column(col =>
         {
-            col.Item().Text("TAX INVOICE").FontSize(16).Bold().FontColor(Colors.Blue.Darken2);
+            col.Item().Text("INVOICE").FontSize(16).Bold().FontColor(Brand(m));
             col.Item().PaddingTop(4).Row(row =>
             {
                 row.RelativeItem().Column(left =>
@@ -54,6 +52,9 @@ public class InvoicePdfGenerator : IInvoicePdfGenerator
                     right.Item().AlignRight().Text($"Due: {m.DueDate:dd MMM yyyy}").FontSize(9);
                     if (m.PeriodFrom is { } pf && m.PeriodTo is { } pt)
                         right.Item().AlignRight().Text($"Period: {pf:dd MMM} – {pt:dd MMM yyyy}").FontSize(9);
+
+                    var (statusText, statusColor) = StatusLabel(m.Status, m.TotalAmount - m.PaidAmount);
+                    right.Item().AlignRight().PaddingTop(3).Text(statusText).Bold().FontColor(statusColor);
                 });
             });
             col.Item().PaddingTop(6).LineHorizontal(1).LineColor(Colors.Grey.Lighten1);
@@ -71,10 +72,11 @@ public class InvoicePdfGenerator : IInvoicePdfGenerator
 
             col.Item().PaddingTop(10).Table(table =>
             {
+                // HSN is a GST tax-invoice requirement — omit the column on a bill of supply.
                 table.ColumnsDefinition(c =>
                 {
                     c.RelativeColumn(4);   // description
-                    c.RelativeColumn(1.3f); // HSN
+                    if (m.IsTaxInvoice) c.RelativeColumn(1.3f); // HSN
                     c.RelativeColumn(1);   // qty
                     c.RelativeColumn(1.4f); // rate
                     c.RelativeColumn(1.6f); // amount
@@ -83,30 +85,43 @@ public class InvoicePdfGenerator : IInvoicePdfGenerator
                 table.Header(header =>
                 {
                     HeaderCell(header, "Description");
-                    HeaderCell(header, "HSN");
-                    HeaderCell(header, "Qty");
-                    HeaderCell(header, "Rate");
-                    HeaderCell(header, "Amount");
+                    if (m.IsTaxInvoice) HeaderCell(header, "HSN");
+                    HeaderCell(header, "Qty", right: true);
+                    HeaderCell(header, "Rate", right: true);
+                    HeaderCell(header, "Amount", right: true);
                 });
 
                 foreach (var line in m.Lines)
                 {
                     BodyCell(table, line.Description);
-                    BodyCell(table, line.Hsn);
-                    BodyCell(table, line.Quantity.ToString());
-                    BodyCell(table, Money(line.Rate));
-                    BodyCell(table, Money(line.Amount));
+                    if (m.IsTaxInvoice) BodyCell(table, line.Hsn);
+                    BodyCell(table, line.Quantity.ToString(), right: true);
+                    BodyCell(table, Money(line.Rate), right: true);
+                    BodyCell(table, Money(line.Amount), right: true);
                 }
             });
 
-            col.Item().PaddingTop(10).AlignRight().Column(totals =>
+            col.Item().PaddingTop(12).AlignRight().Width(170).Column(totals =>
             {
-                TotalRow(totals, "Subtotal", m.SubTotal);
-                if (m.Discount > 0) TotalRow(totals, "Discount", -m.Discount);
+                TotalLine(totals, "Subtotal", Money(m.SubTotal));
+                if (m.Discount > 0) TotalLine(totals, "Discount", $"−{Money(m.Discount)}", valueColor: ColTeal);
                 // GST may be turned off for this tenant (§24) — omit the tax rows when there's no tax.
-                if (m.CgstAmount > 0) TotalRow(totals, "CGST", m.CgstAmount);
-                if (m.SgstAmount > 0) TotalRow(totals, "SGST", m.SgstAmount);
-                totals.Item().PaddingTop(2).Text($"Total: {Money(m.TotalAmount)}").Bold().FontSize(12);
+                if (m.CgstAmount > 0) TotalLine(totals, "CGST", Money(m.CgstAmount));
+                if (m.SgstAmount > 0) TotalLine(totals, "SGST", Money(m.SgstAmount));
+
+                totals.Item().PaddingTop(4).LineHorizontal(0.75f).LineColor(Colors.Grey.Lighten1);
+                totals.Item().PaddingTop(3);
+                TotalLine(totals, "Total", Money(m.TotalAmount), strong: true, size: 12, valueColor: Brand(m));
+
+                // Show the paid/balance split ONLY on a partial payment. When fully paid, Total already
+                // equals the amount and the header shows PAID, so a "Paid = Total" row is just noise;
+                // when unpaid there's nothing to show.
+                var balance = m.TotalAmount - m.PaidAmount;
+                if (m.PaidAmount > 0 && balance > 0)
+                {
+                    TotalLine(totals, "Paid", Money(m.PaidAmount), valueColor: ColTeal);
+                    TotalLine(totals, "Balance", Money(balance), valueColor: ColDanger);
+                }
             });
 
             if (!string.IsNullOrWhiteSpace(m.Notes))
@@ -114,14 +129,57 @@ public class InvoicePdfGenerator : IInvoicePdfGenerator
         });
     }
 
-    private static void HeaderCell(TableCellDescriptor header, string text) =>
-        header.Cell().Background(Colors.Grey.Lighten3).Padding(5).Text(text).Bold().FontSize(9);
+    private static void HeaderCell(TableCellDescriptor header, string text, bool right = false)
+    {
+        var cell = header.Cell().Background(Colors.Grey.Lighten3).Padding(5);
+        (right ? cell.AlignRight() : cell).Text(text).Bold().FontSize(9);
+    }
 
-    private static void BodyCell(TableDescriptor table, string text) =>
-        table.Cell().BorderBottom(0.5f).BorderColor(Colors.Grey.Lighten2).Padding(5).Text(text).FontSize(9);
+    private static void BodyCell(TableDescriptor table, string text, bool right = false)
+    {
+        var cell = table.Cell().BorderBottom(0.5f).BorderColor(Colors.Grey.Lighten2).Padding(5);
+        (right ? cell.AlignRight() : cell).Text(text).FontSize(9);
+    }
 
-    private static void TotalRow(ColumnDescriptor col, string label, decimal amount) =>
-        col.Item().Text($"{label}: {Money(amount)}").FontSize(10);
+    // Brand palette (matches the app's design tokens) — kept as hex so QuestPDF's string→Color
+    // conversion is unambiguous in the totals block.
+    private const string ColInk = "#444441";
+    private const string ColInkMid = "#888780";
+    private const string ColNavy = "#0C447C";
+    private const string ColTeal = "#1D9E75";
+    private const string ColDanger = "#E24B4A";
+
+    /// <summary>One totals row: label on the left (grey), amount right-aligned. `strong` makes it the
+    /// bold navy Total line; `valueColor` (brand hex) tints the amount (teal discount/paid, red balance due).</summary>
+    private static void TotalLine(ColumnDescriptor col, string label, string value,
+        bool strong = false, string? valueColor = null, float size = 10)
+    {
+        col.Item().PaddingVertical(1).Row(row =>
+        {
+            var lbl = row.RelativeItem().Text(label).FontSize(size).FontColor(strong ? ColInk : ColInkMid);
+            if (strong) lbl.Bold();
+
+            var val = row.RelativeItem().AlignRight().Text(value).FontSize(size)
+                .FontColor(valueColor ?? (strong ? ColNavy : ColInk));
+            if (strong) val.Bold();
+        });
+    }
+
+    /// <summary>Colour-coded payment status shown in the header. Balance wins over status so a fully-settled
+    /// invoice reads PAID regardless of its stored status; a cancelled invoice is always flagged.</summary>
+    private static (string Text, string Color) StatusLabel(string status, decimal balanceDue) => status switch
+    {
+        "Cancelled" => ("CANCELLED", Colors.Red.Darken2),
+        _ when balanceDue <= 0 => ("PAID", Colors.Green.Darken2),
+        "Overdue" => ("OVERDUE", Colors.Red.Darken1),
+        "PartiallyPaid" => ("PARTIALLY PAID", Colors.Orange.Darken2),
+        _ => ("PAYMENT DUE", Colors.Orange.Darken1),
+    };
 
     private static string Money(decimal value) => $"₹{value:N2}";
+
+    /// <summary>The tenant's brand colour for accents (title, total), falling back to the app navy when
+    /// unset or not a well-formed #RRGGBB hex — so a bad value can never break QuestPDF's colour parse.</summary>
+    private static string Brand(InvoicePdfModel m) =>
+        m.BrandColor is { Length: 7 } c && c[0] == '#' && c[1..].All(Uri.IsHexDigit) ? c : ColNavy;
 }

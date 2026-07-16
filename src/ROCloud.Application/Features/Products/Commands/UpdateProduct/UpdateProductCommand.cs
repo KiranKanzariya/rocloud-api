@@ -13,6 +13,7 @@ public sealed record UpdateProductCommand(
     string BottleSize,
     decimal DefaultRate,
     string? Unit,
+    string? Hsn,
     bool IsActive) : IRequest;
 
 public class UpdateProductCommandValidator : AbstractValidator<UpdateProductCommand>
@@ -26,6 +27,7 @@ public class UpdateProductCommandValidator : AbstractValidator<UpdateProductComm
             .WithMessage("Invalid bottle size. Allowed: 18L, 20L, 250ml, 500ml, 1L, Custom.");
         RuleFor(c => c.DefaultRate).GreaterThanOrEqualTo(0);
         RuleFor(c => c.Unit).MaximumLength(20);
+        RuleFor(c => c.Hsn).MaximumLength(8);
     }
 }
 
@@ -44,6 +46,7 @@ public class UpdateProductCommandHandler : IRequestHandler<UpdateProductCommand>
         product.BottleSize = BottleSizeExtensions.FromWire(request.BottleSize)!.Value;
         product.DefaultRate = request.DefaultRate;
         product.Unit = string.IsNullOrWhiteSpace(request.Unit) ? "bottle" : request.Unit;
+        product.Hsn = string.IsNullOrWhiteSpace(request.Hsn) ? null : request.Hsn.Trim();
         product.IsActive = request.IsActive;
 
         await _db.SaveChangesAsync(ct);

@@ -116,6 +116,17 @@ public class AppDbContext : DbContext, IAppDbContext
         return base.SaveChangesAsync(cancellationToken);
     }
 
+    /// <summary>True for a real relational provider; false for the in-memory test store.</summary>
+    public bool IsRelational => Database.IsRelational();
+
+    /// <summary>Begins a database transaction (relational providers only — see <see cref="IsRelational"/>).</summary>
+    public Task<Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction> BeginTransactionAsync(
+        CancellationToken cancellationToken = default)
+        => Database.BeginTransactionAsync(cancellationToken);
+
+    /// <summary>Detaches all tracked entities (see <see cref="IAppDbContext.ClearChangeTracker"/>).</summary>
+    public void ClearChangeTracker() => ChangeTracker.Clear();
+
     /// <summary>Converts a PascalCase CLR name to snake_case (e.g. TenantId → tenant_id).</summary>
     private static string ToSnakeCase(string name)
     {

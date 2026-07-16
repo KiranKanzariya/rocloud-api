@@ -600,6 +600,7 @@ CREATE TABLE public.products (
     bottle_size character varying(20) NOT NULL,
     default_rate numeric(10,2) NOT NULL,
     unit character varying(20) DEFAULT 'bottle'::character varying NOT NULL,
+    hsn character varying(8),
     is_active boolean DEFAULT true NOT NULL,
     is_deleted boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,

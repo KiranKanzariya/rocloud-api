@@ -24,7 +24,8 @@ public class GetInvoicePdfQueryHandler : IRequestHandler<GetInvoicePdfQuery, Inv
 
     public async Task<InvoicePdfResult> Handle(GetInvoicePdfQuery request, CancellationToken ct)
     {
-        var invoice = await _db.Invoices.FirstOrDefaultAsync(i => i.Id == request.Id, ct)
+        // Read-only render path — never tracked (the PDF is rebuilt from the row, nothing is written).
+        var invoice = await _db.Invoices.AsNoTracking().FirstOrDefaultAsync(i => i.Id == request.Id, ct)
                       ?? throw new NotFoundException("Invoice", request.Id);
 
         var model = await InvoicePdfModelBuilder.BuildAsync(_db, invoice, ct);

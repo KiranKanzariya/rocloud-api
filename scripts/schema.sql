@@ -192,6 +192,7 @@ CREATE TABLE products (
                         CHECK (bottle_size IN ('18L','20L','250ml','500ml','1L','Custom')),
     default_rate    DECIMAL(10,2) NOT NULL,
     unit            VARCHAR(20) NOT NULL DEFAULT 'bottle',
+    hsn             VARCHAR(8),
     is_active       BOOLEAN NOT NULL DEFAULT true,
     is_deleted      BOOLEAN NOT NULL DEFAULT false,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
