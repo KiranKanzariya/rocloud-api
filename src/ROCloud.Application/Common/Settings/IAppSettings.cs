@@ -87,4 +87,12 @@ public interface IAppSettings
     /// used by the expiry job and the on-demand "Renew now" eligibility check
     /// (Jobs:SubscriptionInvoiceLeadDays). Default 5.</summary>
     int SubscriptionInvoiceLeadDays { get; }
+
+    /// <summary>
+    /// Days a lapsed paid subscription keeps working before the paywall arms
+    /// (Subscription:OverdueGraceDays). Default 7. Read by TenantMiddleware to decide when to block, and
+    /// by SubscriptionTermCalculator to decide which days a late payer is billed for — the two must
+    /// agree, or a tenant is charged for days it had blocked (or credited days it could use).
+    /// </summary>
+    int SubscriptionOverdueGraceDays { get; }
 }

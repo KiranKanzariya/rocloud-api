@@ -1,3 +1,4 @@
+using ROCloud.Application.Common;
 using FluentValidation;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -70,7 +71,7 @@ public class CreateCustomerSubscriptionCommandHandler
             Quantity = request.Quantity,
             Frequency = Enum.Parse<SubscriptionFrequency>(request.Frequency),
             RatePerUnit = request.RatePerUnit ?? product.DefaultRate,
-            StartDate = request.StartDate ?? DateOnly.FromDateTime(DateTime.UtcNow),
+            StartDate = request.StartDate ?? AppTimeZone.Today(DateTime.UtcNow),
             IsActive = true
         };
 

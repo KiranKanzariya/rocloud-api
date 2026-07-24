@@ -27,24 +27,26 @@ public sealed class BrandedEmailService : IEmailService
         _logger = logger;
     }
 
-    public Task SendAsync(string to, string subject, string htmlBody, CancellationToken ct = default)
+    public Task<bool> SendAsync(string to, string subject, string htmlBody, CancellationToken ct = default)
     {
+        // Switched off is "not sent" — report it as such, so a caller that records the send (the
+        // reminder throttle) doesn't write a reminder_log row for a mail that never left.
         if (!_settings.EmailEnabled)
         {
             _logger.LogInformation("[EMAIL not sent — disabled via Notifications:EmailEnabled] To={To} Subject={Subject}", to, subject);
-            return Task.CompletedTask;
+            return Task.FromResult(false);
         }
         return _inner.SendAsync(to, subject, EmailHtml.Wrap(htmlBody, _brand.Current), ct);
     }
 
-    public Task SendAsync(
+    public Task<bool> SendAsync(
         string to, string subject, string htmlBody,
         IReadOnlyList<EmailAttachment> attachments, CancellationToken ct = default)
     {
         if (!_settings.EmailEnabled)
         {
             _logger.LogInformation("[EMAIL not sent — disabled via Notifications:EmailEnabled] To={To} Subject={Subject}", to, subject);
-            return Task.CompletedTask;
+            return Task.FromResult(false);
         }
         return _inner.SendAsync(to, subject, EmailHtml.Wrap(htmlBody, _brand.Current), attachments, ct);
     }

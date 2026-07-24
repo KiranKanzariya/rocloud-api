@@ -1,3 +1,4 @@
+using ROCloud.Application.Common;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Interfaces;
@@ -26,7 +27,7 @@ public class GetProductionPlanQueryHandler
     public async Task<IReadOnlyList<ProductionPlanDayDto>> Handle(
         GetProductionPlanQuery request, CancellationToken ct)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = AppTimeZone.Today(DateTime.UtcNow);
         var from = request.From ?? today.AddDays(1);
         var to = request.To ?? today.AddDays(30);
         if (to < from) (from, to) = (to, from);

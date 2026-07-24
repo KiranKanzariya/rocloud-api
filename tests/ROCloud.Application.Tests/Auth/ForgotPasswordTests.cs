@@ -10,11 +10,11 @@ public class ForgotPasswordTests
     {
         public string? To { get; private set; }
         public string? Body { get; private set; }
-        public Task SendAsync(string to, string subject, string htmlBody, CancellationToken ct = default)
+        public Task<bool> SendAsync(string to, string subject, string htmlBody, CancellationToken ct = default)
         {
             To = to;
             Body = htmlBody;
-            return Task.CompletedTask;
+            return Task.FromResult(true);
         }
     }
 

@@ -1,3 +1,4 @@
+using ROCloud.Application.Common;
 using FluentValidation;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -44,7 +45,7 @@ public class ScheduleAmcVisitsCommandHandler : IRequestHandler<ScheduleAmcVisits
 
     public async Task<AmcScheduleResultDto> Handle(ScheduleAmcVisitsCommand request, CancellationToken ct)
     {
-        var asOf = request.AsOfDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var asOf = request.AsOfDate ?? AppTimeZone.Today(DateTime.UtcNow);
         var cutoff = asOf.AddDays(request.LeadDays ?? 7);
 
         var dueSubscriptions = await _db.AmcSubscriptions

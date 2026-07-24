@@ -3,6 +3,7 @@ using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
+using ROCloud.Application.Common.Settings;
 using ROCloud.Application.Features.Subscription.Services;
 using ROCloud.Domain.Enums;
 using ValidationException = ROCloud.Application.Common.Exceptions.ValidationException;
@@ -39,15 +40,17 @@ public class CompleteUpgradeCommandHandler : IRequestHandler<CompleteUpgradeComm
     private readonly ITenantContext _tenant;
     private readonly IRazorpayService _razorpay;
     private readonly ISubscriptionInvoiceDelivery _invoiceDelivery;
+    private readonly IAppSettings _settings;
 
     public CompleteUpgradeCommandHandler(
         IAppDbContext db, ITenantContext tenant, IRazorpayService razorpay,
-        ISubscriptionInvoiceDelivery invoiceDelivery)
+        ISubscriptionInvoiceDelivery invoiceDelivery, IAppSettings settings)
     {
         _db = db;
         _tenant = tenant;
         _razorpay = razorpay;
         _invoiceDelivery = invoiceDelivery;
+        _settings = settings;
     }
 
     public async Task Handle(CompleteUpgradeCommand request, CancellationToken ct)
@@ -91,10 +94,13 @@ public class CompleteUpgradeCommandHandler : IRequestHandler<CompleteUpgradeComm
         tenant.PlanId = plan.Id;
         tenant.Status = TenantStatus.Active;
         tenant.TrialEndsAt = null;
-        // Extend from the current paid end date when renewing early, so no already-paid days are lost;
-        // fall back to now for a lapsed/new subscription (guide §25).
-        var basis = tenant.SubscriptionEndsAt is { } end && end > DateTime.UtcNow ? end : DateTime.UtcNow;
-        tenant.SubscriptionEndsAt = yearly ? basis.AddYears(1) : basis.AddMonths(1);
+        // One cycle of USABLE access: extends from the current end when upgrading early (no paid day
+        // lost), bills the grace days a lapsed tenant used, and credits any locked-out days back.
+        var now = DateTime.UtcNow;
+        var termStart = SubscriptionTermCalculator.TermStart(tenant.SubscriptionEndsAt, now);
+        var termEnd = SubscriptionTermCalculator.NextEnd(
+            tenant.SubscriptionEndsAt, yearly, _settings.SubscriptionOverdueGraceDays, now);
+        tenant.SubscriptionEndsAt = termEnd;
 
         // Record the platform billing transaction (feeds the super-admin billing dashboard, guide §26).
         _db.PlatformBillingTransactions.Add(new Domain.Entities.Platform.PlatformBillingTransaction
@@ -116,11 +122,12 @@ public class CompleteUpgradeCommandHandler : IRequestHandler<CompleteUpgradeComm
             open.Status = SubscriptionInvoiceStatus.Void;
 
         // Record the Paid subscription invoice for the owner's billing history (Option A: full plan
-        // price, one cycle; period runs from the extension basis).
+        // price, one cycle). The period is the term actually granted, including any credited days.
         var billingCycle = yearly ? "Yearly" : "Monthly";
         var paidInvoice = await SubscriptionInvoiceFactory.BuildAsync(
-            _db, tenant, plan, billingCycle, DateOnly.FromDateTime(basis),
-            SubscriptionInvoiceStatus.Paid, $"{plan.Name} plan — 1 {(yearly ? "year" : "month")}", ct);
+            _db, tenant, plan, billingCycle, DateOnly.FromDateTime(termStart),
+            SubscriptionInvoiceStatus.Paid, $"{plan.Name} plan — 1 {(yearly ? "year" : "month")}", ct,
+            periodEnd: DateOnly.FromDateTime(termEnd));
         paidInvoice.RazorpayOrderId = request.OrderId;
         _db.SubscriptionInvoices.Add(paidInvoice);
 

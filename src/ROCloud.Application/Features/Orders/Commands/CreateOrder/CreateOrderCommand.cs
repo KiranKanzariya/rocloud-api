@@ -1,3 +1,4 @@
+using ROCloud.Application.Common;
 using FluentValidation;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -79,7 +80,7 @@ public class CreateOrderCommandHandler : IRequestHandler<CreateOrderCommand, Gui
                 ["items"] = [$"Unknown product(s): {string.Join(", ", missing)}"]
             });
 
-        var orderDate = request.OrderDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var orderDate = request.OrderDate ?? AppTimeZone.Today(DateTime.UtcNow);
 
         // An order is always concretely HomeDelivery or PlantPickup. Single-mode customers are fixed;
         // a "Both" customer chooses per order (the request's choice, defaulting to HomeDelivery).

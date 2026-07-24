@@ -54,6 +54,9 @@ public static class RecurringJobRegistration
             "audit-log-retention", j => j.ExecuteAsync(CancellationToken.None), cron, JobOptions())),
         new("log-retention", "0 3 * * *", cron => RecurringJob.AddOrUpdate<LogRetentionJob>(
             "log-retention", j => j.ExecuteAsync(CancellationToken.None), cron, JobOptions())),
+        // Every 15 minutes, and it makes one live Razorpay round-trip per pending payment across every
+        // tenant — so a slow run can still be going when the next fires. ExecuteAsync carries
+        // [DisableConcurrentExecution] to stop the two overlapping and double-resolving the same rows.
         new("payment-reconciliation", "*/15 * * * *", cron => RecurringJob.AddOrUpdate<PaymentReconciliationJob>(
             "payment-reconciliation", j => j.ExecuteAsync(CancellationToken.None), cron, JobOptions())),
     };

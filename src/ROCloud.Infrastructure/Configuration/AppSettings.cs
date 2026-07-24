@@ -44,4 +44,5 @@ public sealed class AppSettings : IAppSettings
     public bool AmcReminderEnabled => Bool("Notifications:CustomerNotifications:AmcReminder", true);
     public bool AdvanceOrderReminderEnabled => Bool("Notifications:CustomerNotifications:AdvanceOrderReminder", true);
     public int SubscriptionInvoiceLeadDays => Int("Jobs:SubscriptionInvoiceLeadDays", 5);
+    public int SubscriptionOverdueGraceDays => Int("Subscription:OverdueGraceDays", 7);
 }

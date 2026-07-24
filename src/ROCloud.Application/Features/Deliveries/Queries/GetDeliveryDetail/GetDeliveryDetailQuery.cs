@@ -22,6 +22,11 @@ public class GetDeliveryDetailQueryHandler : IRequestHandler<GetDeliveryDetailQu
 
     public async Task<DeliveryDetailDto> Handle(GetDeliveryDetailQuery request, CancellationToken ct)
     {
+        // Order.OrderItems and Items are two collection navigations, so a single JOIN would return
+        // |OrderItems| × |Items| rows with the Delivery + Order + Customer payload duplicated across
+        // every one. The Npgsql registration defaults to split queries for exactly this reason (see
+        // Infrastructure/DependencyInjection) — there is no per-query AsSplitQuery here because that
+        // lives in EF Core *Relational*, which this layer deliberately does not reference.
         var delivery = await _db.Deliveries
             .Include(d => d.Order).ThenInclude(o => o!.Customer)
             .Include(d => d.Order).ThenInclude(o => o!.OrderItems)

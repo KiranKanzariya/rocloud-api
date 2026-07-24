@@ -14,10 +14,10 @@ public class FindWorkspaceTests
     private sealed class CapturingEmail : IEmailService
     {
         public List<(string To, string Subject, string Body)> Sent { get; } = [];
-        public Task SendAsync(string to, string subject, string body, CancellationToken ct = default)
+        public Task<bool> SendAsync(string to, string subject, string body, CancellationToken ct = default)
         {
             Sent.Add((to, subject, body));
-            return Task.CompletedTask;
+            return Task.FromResult(true);
         }
     }
 

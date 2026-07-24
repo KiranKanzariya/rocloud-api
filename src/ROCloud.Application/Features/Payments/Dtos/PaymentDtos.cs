@@ -13,7 +13,13 @@ public sealed record PaymentListItemDto(
     string Status,
     string? ReferenceNumber,
     Guid? CollectedBy,
-    DateTime PaidAt);
+    DateTime PaidAt,
+    /// <summary>
+    /// Free-text note. Two sources: what the collector typed, and warnings the reconcile / Razorpay
+    /// confirm paths append (e.g. a possible duplicate payment where a refund may be due). This was
+    /// stored but never returned, so those warnings could not be read by anyone.
+    /// </summary>
+    string? Notes = null);
 
 /// <summary>Filter/paging for the payments list.</summary>
 public sealed record PaymentFilterDto

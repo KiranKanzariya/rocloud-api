@@ -1,3 +1,4 @@
+using ROCloud.Application.Common;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Interfaces;
@@ -48,7 +49,7 @@ public class BulkGenerateInvoicesCommandHandler
             .Select(t => new { t.GstEnabled, t.GstRate })
             .FirstOrDefaultAsync(ct);
         var gstRate = request.GstRate ?? (gst is { GstEnabled: true } ? gst.GstRate : 0m);
-        var invoiceDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        var invoiceDate = AppTimeZone.Today(DateTime.UtcNow);
         var dueDate = invoiceDate.AddDays(request.DueInDays ?? _settings.InvoiceDueInDays);
         var prefix = InvoiceNumberGenerator.Prefix(invoiceDate);
 
@@ -111,6 +112,11 @@ public class BulkGenerateInvoicesCommandHandler
 
         if (created > 0)
         {
+            // The batch and its settlement are one fact — commit both or neither, so a sync failure
+            // can't leave a whole run of invoices un-settled against advances customers already hold.
+            // Guarded for the non-relational in-memory test provider.
+            await using var tx = _db.IsRelational ? await _db.BeginTransactionAsync(ct) : null;
+
             await _db.SaveChangesAsync(ct);
 
             // A freshly raised invoice may already be covered by an advance the customer holds, so
@@ -119,6 +125,8 @@ public class BulkGenerateInvoicesCommandHandler
             foreach (var customerId in billed)
                 await Payments.InvoiceAllocationSync.SyncWithoutSaveAsync(_db, customerId, ct);
             await _db.SaveChangesAsync(ct);
+
+            if (tx is not null) await tx.CommitAsync(ct);
         }
 
         return new BulkInvoiceResultDto(created, customers.Count, skipped);

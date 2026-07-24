@@ -18,12 +18,12 @@ public class BackgroundJobTests
 {
     private sealed class NullEmail : IEmailService
     {
-        public Task SendAsync(string to, string s, string b, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<bool> SendAsync(string to, string s, string b, CancellationToken ct = default) => Task.FromResult(true);
     }
 
     private sealed class NullWhatsApp : IWhatsAppService
     {
-        public Task SendAsync(string mobile, string m, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<bool> SendAsync(string mobile, string m, CancellationToken ct = default) => Task.FromResult(true);
     }
 
     /// <summary>Records every WhatsApp send so a test can assert who was reminded. Registered as a
@@ -31,10 +31,10 @@ public class BackgroundJobTests
     private sealed class RecordingWhatsApp : IWhatsAppService
     {
         public readonly List<(string Mobile, string Message)> Sent = new();
-        public Task SendAsync(string mobile, string m, CancellationToken ct = default)
+        public Task<bool> SendAsync(string mobile, string m, CancellationToken ct = default)
         {
             lock (Sent) Sent.Add((mobile, m));
-            return Task.CompletedTask;
+            return Task.FromResult(true);
         }
     }
 
@@ -43,10 +43,10 @@ public class BackgroundJobTests
     private sealed class RecordingEmail : IEmailService
     {
         public readonly List<(string To, string Subject, string Body)> Sent = new();
-        public Task SendAsync(string to, string s, string b, CancellationToken ct = default)
+        public Task<bool> SendAsync(string to, string s, string b, CancellationToken ct = default)
         {
             lock (Sent) Sent.Add((to, s, b));
-            return Task.CompletedTask;
+            return Task.FromResult(true);
         }
     }
 
@@ -71,7 +71,8 @@ public class BackgroundJobTests
         public string GetDownloadUrl(string p, TimeSpan e) => $"http://test/{p}";
     }
 
-    private static ServiceProvider BuildProvider()
+    /// <param name="email">Pass a recorder to assert on what the job actually sent.</param>
+    private static ServiceProvider BuildProvider(RecordingEmail? email = null)
     {
         var dbName = $"jobs-{Guid.NewGuid()}";
         var services = new ServiceCollection();
@@ -82,7 +83,8 @@ public class BackgroundJobTests
         services.AddScoped<ITenantContext, TenantContext>();
         services.AddSingleton<ROCloud.Application.Common.Settings.IAppSettings, Auth.FakeAppSettings>();
         services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(BulkGenerateInvoicesCommand).Assembly));
-        services.AddScoped<IEmailService, NullEmail>();
+        if (email is not null) services.AddSingleton<IEmailService>(email);
+        else services.AddScoped<IEmailService, NullEmail>();
         services.AddScoped<IWhatsAppService, NullWhatsApp>();
         services.AddScoped<INotificationTemplateRenderer, ROCloud.Application.Common.Services.NotificationTemplateRenderer>();
         services.AddScoped<IInvoicePdfGenerator, FakePdf>();
@@ -428,6 +430,146 @@ public class BackgroundJobTests
             var tenant = await db.Tenants.FirstAsync(t => t.Id == tenantId);
             Assert.Equal(TenantStatus.Suspended, tenant.Status);
         }
+    }
+
+    /// <summary>
+    /// Seeds one Overdue tenant with the given end dates, runs the expiry job, and reports its status.
+    /// A never-paid trial has no SubscriptionEndsAt, which is what selects the shorter suspend window.
+    /// </summary>
+    private static async Task<TenantStatus> RunExpiryJobForOverdueTenantAsync(
+        DateTime? subscriptionEndsAt, DateTime? trialEndsAt)
+    {
+        var provider = BuildProvider();
+        var tenantId = Guid.NewGuid();
+
+        using (var scope = provider.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Plans.Add(new Plan { Id = Guid.NewGuid(), Name = "Pro", PlanType = PlanType.Pro, MonthlyPrice = 999m });
+            db.Tenants.Add(new Tenant
+            {
+                Id = tenantId, PlanId = db.Plans.Local.First().Id, Name = "Lapsed Co", Subdomain = "lapsed",
+                OwnerName = "O", OwnerEmail = "o@x.com", OwnerMobile = "9",
+                Status = TenantStatus.Overdue,
+                SubscriptionEndsAt = subscriptionEndsAt,
+                TrialEndsAt = trialEndsAt
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await provider.GetRequiredService<SubscriptionExpiryJob>().ExecuteAsync(CancellationToken.None);
+
+        using var verify = provider.CreateScope();
+        var verifyDb = verify.ServiceProvider.GetRequiredService<AppDbContext>();
+        return (await verifyDb.Tenants.FirstAsync(t => t.Id == tenantId)).Status;
+    }
+
+    /// <summary>
+    /// Runs the expiry job for one tenant whose window is closing, and returns the reminder email.
+    /// No template rows are seeded, so this exercises the job's own fallback wording and the tokens it
+    /// supplies — the template body is the same sentence.
+    /// </summary>
+    private static async Task<(string Subject, string Body)> ExpiryReminderForAsync(
+        DateTime? trialEndsAt, DateTime? subscriptionEndsAt, TenantStatus status)
+    {
+        var email = new RecordingEmail();
+        var provider = BuildProvider(email);
+
+        using (var scope = provider.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Plans.Add(new Plan { Id = Guid.NewGuid(), Name = "Basic", PlanType = PlanType.Basic, MonthlyPrice = 999m });
+            db.Tenants.Add(new Tenant
+            {
+                Id = Guid.NewGuid(), PlanId = db.Plans.Local.First().Id, Name = "Akash Water", Subdomain = "akash",
+                OwnerName = "Akash", OwnerEmail = "akash@x.com", OwnerMobile = "9",
+                Status = status, TrialEndsAt = trialEndsAt, SubscriptionEndsAt = subscriptionEndsAt,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await provider.GetRequiredService<SubscriptionExpiryJob>().ExecuteAsync(CancellationToken.None);
+
+        // A paid tenant this close to expiry is also inside the invoice lead window, so the job emails
+        // the renewal invoice too. Pick the reminder by subject rather than assuming a single send.
+        var sent = email.Sent.First(e => !e.Subject.Contains("invoice", StringComparison.OrdinalIgnoreCase));
+        return (sent.Subject, sent.Body);
+    }
+
+    [Fact]
+    public async Task ExpiryReminder_NamesTheActualEndDate_NotTheConfiguredWarningWindow()
+    {
+        // The bug: {{Days}} was filled with Jobs:SubscriptionExpiryWarnDays (7), so an owner two days
+        // from expiry was still told "expires within 7 days" — on every reminder in the window.
+        var endsAt = DateTime.UtcNow.AddDays(2);
+
+        var (subject, body) = await ExpiryReminderForAsync(null, endsAt, TenantStatus.Active);
+
+        var expected = endsAt.ToString("dd MMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Contains(expected, body);
+        Assert.Contains(expected, subject);
+        Assert.DoesNotContain("7 days", body);
+    }
+
+    [Fact]
+    public async Task ExpiryReminder_TellsATrialOwnerItIsATrial_NotASubscriptionToRenew()
+    {
+        // A trial owner bought nothing, so "your subscription … please renew" is meaningless to them.
+        var (subject, body) = await ExpiryReminderForAsync(DateTime.UtcNow.AddDays(3), null, TenantStatus.Trial);
+
+        Assert.Contains("free trial", body);
+        Assert.Contains("free trial", subject);
+        Assert.DoesNotContain("renew", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExpiryReminder_CallsAPaidTenantsTermASubscription()
+    {
+        var (_, body) = await ExpiryReminderForAsync(
+            DateTime.UtcNow.AddDays(-90), DateTime.UtcNow.AddDays(3), TenantStatus.Active);
+
+        // The stale trial date every paying tenant carries must not make this read as a trial notice.
+        Assert.Contains("subscription", body);
+        Assert.DoesNotContain("trial", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SubscriptionExpiryJob_NeverPaidTrial_SuspendsAfterTheShorterTrialWindow()
+    {
+        // 8 days past trial end: already suspended on the 7-day trial window, but would still be
+        // waiting on the 30-day paid window — this is the case the separate knob exists for.
+        var status = await RunExpiryJobForOverdueTenantAsync(
+            subscriptionEndsAt: null, trialEndsAt: DateTime.UtcNow.AddDays(-8));
+
+        Assert.Equal(TenantStatus.Suspended, status);
+    }
+
+    [Fact]
+    public async Task SubscriptionExpiryJob_NeverPaidTrial_StaysOverdueInsideTheTrialWindow()
+    {
+        var status = await RunExpiryJobForOverdueTenantAsync(
+            subscriptionEndsAt: null, trialEndsAt: DateTime.UtcNow.AddDays(-3));
+
+        Assert.Equal(TenantStatus.Overdue, status);
+    }
+
+    [Fact]
+    public async Task SubscriptionExpiryJob_PaidLapse_KeepsTheLongerWindow_EvenPastTheTrialOne()
+    {
+        // A paying customer 10 days late must NOT be caught by the trial window — they get the full
+        // 30-day dunning month. The stale TrialEndsAt from their signup must not shorten it either.
+        var status = await RunExpiryJobForOverdueTenantAsync(
+            subscriptionEndsAt: DateTime.UtcNow.AddDays(-10), trialEndsAt: DateTime.UtcNow.AddDays(-400));
+
+        Assert.Equal(TenantStatus.Overdue, status);
+    }
+
+    [Fact]
+    public async Task SubscriptionExpiryJob_NoEndDatesAtAll_IsNeverSuspended()
+    {
+        var status = await RunExpiryJobForOverdueTenantAsync(subscriptionEndsAt: null, trialEndsAt: null);
+
+        Assert.Equal(TenantStatus.Overdue, status);
     }
 
     [Fact]

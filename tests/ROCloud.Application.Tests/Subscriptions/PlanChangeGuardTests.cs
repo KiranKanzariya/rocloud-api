@@ -67,7 +67,7 @@ public class PlanChangeGuardTests
         var (db, ctx, tenantId) = NewDb();
         await SeedAsync(db, tenantId, currentMaxUsers: 10, userCount: 4);
 
-        await Assert.ThrowsAsync<ValidationException>(() => new CompleteUpgradeCommandHandler(db, ctx, new FakeRazorpayService(), new NoOpSubscriptionInvoiceDelivery())
+        await Assert.ThrowsAsync<ValidationException>(() => new CompleteUpgradeCommandHandler(db, ctx, new FakeRazorpayService(), new NoOpSubscriptionInvoiceDelivery(), new Auth.FakeAppSettings())
             .Handle(new CompleteUpgradeCommand("Basic", "Monthly"), CancellationToken.None));
     }
 

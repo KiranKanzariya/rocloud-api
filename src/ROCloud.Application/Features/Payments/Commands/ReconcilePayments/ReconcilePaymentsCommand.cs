@@ -79,7 +79,7 @@ public class ReconcilePaymentsCommandHandler : IRequestHandler<ReconcilePayments
                                              || invoice.PaidAmount >= invoice.TotalAmount;
                         if (alreadySettled)
                         {
-                            p.Notes = Append(p.Notes, "Reconciled: invoice already settled — possible duplicate payment, refund may be due.");
+                            p.Notes = PaymentNotes.Append(p.Notes, PaymentNotes.PossibleDuplicate);
                             duplicates++;
                             continue;   // money captured, but do NOT re-credit the invoice
                         }
@@ -92,7 +92,7 @@ public class ReconcilePaymentsCommandHandler : IRequestHandler<ReconcilePayments
             else if (p.PaidAt < now - AbandonAfter)
             {
                 p.Status = PaymentStatus.Failed;
-                p.Notes = Append(p.Notes, "Reconciled: no payment received — checkout abandoned.");
+                p.Notes = PaymentNotes.Append(p.Notes, PaymentNotes.CheckoutAbandoned);
                 failed++;
             }
             else
@@ -103,6 +103,10 @@ public class ReconcilePaymentsCommandHandler : IRequestHandler<ReconcilePayments
 
         if (completed + failed + duplicates > 0)
         {
+            // The status flips and the re-settlement they force are one fact — commit both or neither.
+            // Guarded for the non-relational in-memory test provider.
+            await using var tx = _db.IsRelational ? await _db.BeginTransactionAsync(ct) : null;
+
             await _db.SaveChangesAsync(ct);
 
             // Some of these payments just became real (Completed) and some just died (Failed). Either
@@ -111,11 +115,10 @@ public class ReconcilePaymentsCommandHandler : IRequestHandler<ReconcilePayments
             foreach (var customerId in pending.Select(p => p.CustomerId).Distinct())
                 await Payments.InvoiceAllocationSync.SyncWithoutSaveAsync(_db, customerId, ct);
             await _db.SaveChangesAsync(ct);
+
+            if (tx is not null) await tx.CommitAsync(ct);
         }
 
         return new ReconcilePaymentsResult(completed, failed, duplicates, stillPending);
     }
-
-    private static string Append(string? notes, string add)
-        => string.IsNullOrWhiteSpace(notes) ? add : $"{notes} {add}";
 }

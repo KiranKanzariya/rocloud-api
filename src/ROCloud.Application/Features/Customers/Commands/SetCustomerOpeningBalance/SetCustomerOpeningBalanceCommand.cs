@@ -1,3 +1,4 @@
+using ROCloud.Application.Common;
 using FluentValidation;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -47,7 +48,7 @@ public class SetCustomerOpeningBalanceCommandValidator : AbstractValidator<SetCu
     {
         RuleFor(c => c.CustomerId).NotEmpty();
         RuleFor(c => c.CutoverDate)
-            .LessThanOrEqualTo(_ => DateOnly.FromDateTime(DateTime.UtcNow))
+            .LessThanOrEqualTo(_ => AppTimeZone.Today(DateTime.UtcNow))
             .WithMessage("The cutover date cannot be in the future.");
         RuleForEach(c => c.Jars).ChildRules(j =>
         {

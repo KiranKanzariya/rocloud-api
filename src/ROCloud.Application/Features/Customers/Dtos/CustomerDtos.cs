@@ -49,7 +49,12 @@ public sealed record CustomerSubscriptionDto(
 
 public sealed record CustomerOrderSummaryDto(Guid Id, DateOnly OrderDate, string Status);
 
-public sealed record CustomerPaymentSummaryDto(Guid Id, decimal Amount, string PaymentMethod, DateTime PaidAt);
+/// <param name="Notes">
+/// Collector's remark, plus any warning appended by the reconcile / Razorpay confirm paths (see
+/// PaymentNotes). Carried here too so the customer's payment history shows what the payments list does.
+/// </param>
+public sealed record CustomerPaymentSummaryDto(
+    Guid Id, decimal Amount, string PaymentMethod, DateTime PaidAt, string? Notes = null);
 
 public sealed record CustomerStatsDto(
     int LifetimeJarsDelivered,

@@ -19,6 +19,11 @@ public class GetOrderByIdQueryHandler : IRequestHandler<GetOrderByIdQuery, Order
 
     public async Task<OrderDto> Handle(GetOrderByIdQuery request, CancellationToken ct)
     {
+        // OrderItems and Delivery.Items are two collection navigations, so a single JOIN would return
+        // |OrderItems| × |Delivery.Items| rows with the Order + Customer + Area payload duplicated
+        // across every one. The Npgsql registration defaults to split queries for exactly this reason
+        // (see Infrastructure/DependencyInjection) — there is no per-query AsSplitQuery here because
+        // that lives in EF Core *Relational*, which this layer deliberately does not reference.
         var order = await _db.Orders
             .Include(o => o.Customer)
             .Include(o => o.Area)

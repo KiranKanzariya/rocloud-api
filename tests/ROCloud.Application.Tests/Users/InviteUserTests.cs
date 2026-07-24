@@ -18,10 +18,10 @@ public class InviteUserTests
     private sealed class CapturingEmail : IEmailService
     {
         public string? Body { get; private set; }
-        public Task SendAsync(string to, string subject, string htmlBody, CancellationToken ct = default)
+        public Task<bool> SendAsync(string to, string subject, string htmlBody, CancellationToken ct = default)
         {
             Body = htmlBody;
-            return Task.CompletedTask;
+            return Task.FromResult(true);
         }
     }
 

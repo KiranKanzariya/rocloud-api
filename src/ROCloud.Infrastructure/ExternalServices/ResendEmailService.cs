@@ -24,10 +24,10 @@ public class ResendEmailService : IEmailService
         _logger = logger;
     }
 
-    public Task SendAsync(string to, string subject, string htmlBody, CancellationToken ct = default)
+    public Task<bool> SendAsync(string to, string subject, string htmlBody, CancellationToken ct = default)
         => SendAsync(to, subject, htmlBody, Array.Empty<EmailAttachment>(), ct);
 
-    public async Task SendAsync(
+    public async Task<bool> SendAsync(
         string to, string subject, string htmlBody,
         IReadOnlyList<EmailAttachment> attachments, CancellationToken ct = default)
     {
@@ -35,7 +35,7 @@ public class ResendEmailService : IEmailService
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             _logger.LogInformation("[EMAIL not sent — Resend unconfigured] To={To} Subject={Subject}", to, subject);
-            return;
+            return false;
         }
 
         var fromEmail = _config["Resend:FromEmail"] ?? "no-reply@rocloud.app";
@@ -67,11 +67,21 @@ public class ResendEmailService : IEmailService
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
-        using var response = await _http.SendAsync(request, ct);
-        if (!response.IsSuccessStatusCode)
+        try
         {
+            using var response = await _http.SendAsync(request, ct);
+            if (response.IsSuccessStatusCode) return true;
+
             var body = await response.Content.ReadAsStringAsync(ct);
             _logger.LogError("Resend failed ({Status}) sending to {To}: {Body}", response.StatusCode, to, body);
+            return false;
+        }
+        // A transport failure (DNS, TLS, or the 10s timeout) must be reported as "not sent" like any
+        // other failure — not surface as an exception that aborts the caller's whole batch.
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "Resend transport failure sending to {To}", to);
+            return false;
         }
     }
 }

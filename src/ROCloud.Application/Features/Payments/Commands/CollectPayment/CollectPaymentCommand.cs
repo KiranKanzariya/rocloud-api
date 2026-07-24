@@ -91,11 +91,20 @@ public class CollectPaymentCommandHandler : IRequestHandler<CollectPaymentComman
         if (invoice is not null)
             PaymentApplication.ApplyToInvoice(invoice, request.Amount);
 
+        // The payment row and the invoice settlement it causes are one fact, so they commit together.
+        // Without this the payment saves, and a failure in the allocation sync below leaves the money
+        // banked while the invoice still reads unpaid — the customer keeps getting dunned for it until
+        // the nightly InvoiceAllocationSyncJob catches up. The in-memory test provider is
+        // non-relational and has no transactions, hence the IsRelational guard (same as ImportCustomers).
+        await using var tx = _db.IsRelational ? await _db.BeginTransactionAsync(ct) : null;
+
         await _db.SaveChangesAsync(ct);
 
         // Spread whatever is not booked against an invoice over the customer's oldest dues, and write
         // the result down — so the invoice list, its status filter, and the reminders all agree.
         await InvoiceAllocationSync.SyncAsync(_db, customer.Id, ct);
+
+        if (tx is not null) await tx.CommitAsync(ct);
 
         // Audit trail: the payment row itself is the record; structured audit lands in Phase 15.
         _logger.LogInformation(

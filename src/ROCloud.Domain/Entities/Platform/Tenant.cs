@@ -18,6 +18,9 @@ public class Tenant : BaseEntity
     public TenantStatus Status { get; set; } = TenantStatus.Trial;
     public DateTime? TrialEndsAt { get; set; }
     public DateTime? SubscriptionEndsAt { get; set; }
+    /// <summary>When the tenant was suspended (null unless currently suspended). Lets a reactivation
+    /// credit back the paid days a subscriber lost while blocked. DB: tenants.suspended_at.</summary>
+    public DateTime? SuspendedAt { get; set; }
     public string? RazorpaySubscriptionId { get; set; }
     public string? RazorpayCustomerId { get; set; }
     public string? GstNumber { get; set; }

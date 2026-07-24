@@ -1,3 +1,4 @@
+using ROCloud.Application.Common;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ROCloud.API.Filters;
@@ -31,7 +32,7 @@ public class ReportsController : ControllerBase
     }
 
     private Guid TenantId => _tenant.TenantId;
-    private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow);
+    private static DateOnly Today => AppTimeZone.Today(DateTime.UtcNow);
     private static DateOnly MonthStart => new(Today.Year, Today.Month, 1);
 
     [HttpGet("collection")]

@@ -1,3 +1,4 @@
+using ROCloud.Application.Common;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Interfaces;
@@ -54,7 +55,7 @@ public class GetNotificationsQueryHandler : IRequestHandler<GetNotificationsQuer
     /// <summary>Reconciles stored notifications with the tenant's current actionable counts.</summary>
     private async Task GenerateAsync(Guid userId, CancellationToken ct)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = AppTimeZone.Today(DateTime.UtcNow);
 
         // Counts are tenant-scoped automatically by the global query filter.
         var overdueInvoices = await _db.Invoices.CountAsync(i => i.Status == InvoiceStatus.Overdue, ct);

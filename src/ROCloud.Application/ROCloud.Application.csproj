@@ -19,6 +19,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- NU1902: HtmlSanitizer 9.0.892 pins AngleSharp to EXACTLY [0.17.1], which carries a moderate
+         advisory (GHSA-pgww-w46g-26qg). AngleSharp cannot be bumped on its own because of that exact
+         pin, and 9.0.892 is the newest STABLE HtmlSanitizer — the fix (AngleSharp 1.5.2) only ships in
+         the 9.1.x BETA line, which we will not put on the XSS-sanitisation path yet.
+         Warn-don't-fail (NOT NoWarn) so the advisory stays visible on every build until we can move to
+         a stable HtmlSanitizer 9.1. -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1902</WarningsNotAsErrors>
   </PropertyGroup>
 
 </Project>

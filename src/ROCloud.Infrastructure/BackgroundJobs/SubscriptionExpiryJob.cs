@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,7 +16,8 @@ namespace ROCloud.Infrastructure.BackgroundJobs;
 /// (1) flips Active tenants whose paid period has lapsed to Overdue (this is what arms the
 /// middleware's payment-required block after Subscription:OverdueGraceDays and the auto-suspend
 /// below); (2) reminds tenants whose trial/subscription ends within Jobs:SubscriptionExpiryWarnDays;
-/// (3) suspends tenants that have been Overdue for Jobs:SubscriptionSuspendGraceDays+.
+/// (3) suspends tenants that have been Overdue for Jobs:SubscriptionSuspendGraceDays+ (a paid lapse)
+/// or Jobs:TrialSuspendGraceDays+ (a never-paid trial).
 /// Operates platform-wide (tenants has no RLS).
 /// </summary>
 public class SubscriptionExpiryJob
@@ -24,6 +26,8 @@ public class SubscriptionExpiryJob
     private readonly ILogger<SubscriptionExpiryJob> _logger;
     private readonly int _warnDays;
     private readonly int _suspendGraceDays;
+    private readonly int _trialSuspendGraceDays;
+    private readonly int _overdueGraceDays;
     private readonly int _reminderIntervalDays;
     private readonly int _invoiceLeadDays;
 
@@ -34,9 +38,26 @@ public class SubscriptionExpiryJob
         _logger = logger;
         _warnDays = int.TryParse(config["Jobs:SubscriptionExpiryWarnDays"], out var w) ? w : 7;
         _suspendGraceDays = int.TryParse(config["Jobs:SubscriptionSuspendGraceDays"], out var s) ? s : 30;
+        _trialSuspendGraceDays = int.TryParse(config["Jobs:TrialSuspendGraceDays"], out var ts) ? ts : 7;
+        // Must match TenantMiddleware — it decides which days a lapsed tenant could actually use.
+        _overdueGraceDays = int.TryParse(config["Subscription:OverdueGraceDays"], out var og) ? og : 7;
         _reminderIntervalDays = int.TryParse(config["Jobs:SubscriptionExpiryReminderMinIntervalDays"], out var r) && r > 0 ? r : 3;
         _invoiceLeadDays = int.TryParse(config["Jobs:SubscriptionInvoiceLeadDays"], out var il) && il > 0 ? il : 5;
     }
+
+    /// <summary>
+    /// "free trial" / "subscription" in the tenant's language. The label is substituted rather than kept
+    /// in two template rows so the three languages stay one row each per event.
+    /// </summary>
+    private static string PlanLabel(string language, bool isTrial) => (language, isTrial) switch
+    {
+        ("hi", true) => "निःशुल्क परीक्षण",
+        ("hi", false) => "सदस्यता",
+        ("gu", true) => "મફત ટ્રાયલ",
+        ("gu", false) => "સબસ્ક્રિપ્શન",
+        (_, true) => "free trial",
+        (_, false) => "subscription",
+    };
 
     public async Task ExecuteAsync(CancellationToken ct = default)
     {
@@ -49,6 +70,7 @@ public class SubscriptionExpiryJob
         var now = DateTime.UtcNow;
         var soon = now.AddDays(_warnDays);
         var suspendCutoff = now.AddDays(-_suspendGraceDays);
+        var trialSuspendCutoff = now.AddDays(-_trialSuspendGraceDays);
 
         // 1. Mark lapsed tenants Overdue — a paid subscription past SubscriptionEndsAt OR a free
         //    trial past TrialEndsAt (both need the owner to pay). Saved before the suspend step so
@@ -71,7 +93,7 @@ public class SubscriptionExpiryJob
             .Where(t => (t.Status == TenantStatus.Trial || t.Status == TenantStatus.Active || t.Status == TenantStatus.Overdue)
                         && ((t.TrialEndsAt != null && t.TrialEndsAt >= now && t.TrialEndsAt <= soon)
                             || (t.SubscriptionEndsAt != null && t.SubscriptionEndsAt >= now && t.SubscriptionEndsAt <= soon)))
-            .Select(t => new { t.Id, t.OwnerEmail, t.Name })
+            .Select(t => new { t.Id, t.OwnerEmail, t.Name, t.TrialEndsAt, t.SubscriptionEndsAt, t.DefaultLanguage })
             .ToListAsync(ct);
 
         // Cadence throttle so re-runs (and daily runs through the window) don't re-email an owner who
@@ -89,16 +111,34 @@ public class SubscriptionExpiryJob
             if (string.IsNullOrWhiteSpace(t.OwnerEmail) || recentlyReminded.Contains(t.Id)) continue;
             try
             {
+                // A tenant on a trial has no SubscriptionEndsAt, so whichever date is set is the one
+                // running out. Never say "subscription" to a trial owner — they bought nothing, so
+                // there is nothing to "renew"; they need to choose a plan.
+                var isTrial = t.SubscriptionEndsAt is null;
+                var endsAt = t.SubscriptionEndsAt ?? t.TrialEndsAt!.Value;
+                var language = string.IsNullOrWhiteSpace(t.DefaultLanguage) ? "en" : t.DefaultLanguage;
+
                 var tokens = new Dictionary<string, string>
                 {
                     ["TenantName"] = t.Name,
-                    ["Days"] = _warnDays.ToString(),
+                    ["PlanLabel"] = PlanLabel(language, isTrial),
+                    ["EndDate"] = endsAt.ToString("dd MMM yyyy", CultureInfo.InvariantCulture),
+                    // Real days remaining, not the config window — the old code passed the warn setting,
+                    // so an owner one day from expiry was still told "within 7 days". Kept for any
+                    // template that wants a countdown; the shipped wording uses the date, which cannot
+                    // go stale if the mail is read late.
+                    ["Days"] = Math.Max(0, (endsAt.Date - now.Date).Days).ToString(),
                 };
-                // Platform dunning notice — use the shared system default (tenant_id NULL).
-                var rendered = await templates.RenderAsync(null, "subscription_expiry", "en", "Email", tokens, ct);
-                var subject = rendered?.Subject ?? "Your ROCloud subscription is expiring soon";
+                // Platform dunning notice — the shared system default (tenant_id NULL), in the tenant's
+                // own language. This used to be hardcoded "en", leaving the seeded hi/gu rows unusable.
+                var rendered = await templates.RenderAsync(null, "subscription_expiry", language, "Email", tokens, ct);
+                // Fallbacks mirror the seeded English template, so a missing row degrades to the same
+                // wording rather than to a different (and staler) message.
+                var endDate = endsAt.ToString("dd MMM yyyy", CultureInfo.InvariantCulture);
+                var subject = rendered?.Subject ?? $"Your ROCloud {PlanLabel("en", isTrial)} expires on {endDate}";
                 var body = rendered?.Body
-                    ?? $"Hi {t.Name}, your ROCloud subscription expires within {_warnDays} days. Please renew to avoid interruption.";
+                    ?? $"Hi {t.Name}, your ROCloud {PlanLabel("en", isTrial)} expires on {endDate}. "
+                       + "Sign in to keep your workspace running.";
                 await email.SendAsync(t.OwnerEmail, subject, body, ct);
 
                 db.ReminderLogs.Add(new ReminderLog
@@ -161,7 +201,8 @@ public class SubscriptionExpiryJob
                     db, t, t.Plan, cycle, DateOnly.FromDateTime(basis), SubscriptionInvoiceStatus.Paid,
                     $"{t.Plan.Name} plan — 1 {unit} (free renewal)", ct);
                 db.SubscriptionInvoices.Add(freeInvoice);   // no email; its PDF renders on demand
-                t.SubscriptionEndsAt = yearly ? basis.AddYears(1) : basis.AddMonths(1);
+                t.SubscriptionEndsAt = SubscriptionTermCalculator.NextEnd(
+                    t.SubscriptionEndsAt, yearly, _overdueGraceDays, now);
                 t.Status = TenantStatus.Active;
                 autoRenewed++;
                 continue;
@@ -181,12 +222,20 @@ public class SubscriptionExpiryJob
         if (invoicesCreated > 0 || autoRenewed > 0)
             await db.SaveChangesAsync(ct);
 
-        // 3. Suspend tenants that have been Overdue for 30+ days — measured from the effective end
-        //    date (paid end, or trial end for a tenant that lapsed straight from trial).
+        // 3. Suspend tenants that have been Overdue past their suspend grace, measured from the effective
+        //    end date. The two lapse types get different windows, matching what is at stake:
+        //      • PAID lapse (SubscriptionEndsAt set) → 30 days. A real business with live data, staff and
+        //        routes should not be hard-suspended over one late payment; the month is a dunning window.
+        //      • Never-paid TRIAL (no SubscriptionEndsAt) → 7 days. They have paid nothing and have been
+        //        fully blocked since TrialGraceDays (2), so a month in Overdue buys them nothing — it only
+        //        blurs the platform dashboard, where a ghosted trial looks the same as a late customer.
+        //    A tenant with neither date set is never suspended: both comparisons are null-false, which
+        //    preserves the old explicit null guard.
         var toSuspend = await db.Tenants
             .Where(t => t.Status == TenantStatus.Overdue
-                        && (t.SubscriptionEndsAt ?? t.TrialEndsAt) != null
-                        && (t.SubscriptionEndsAt ?? t.TrialEndsAt) < suspendCutoff)
+                        && (t.SubscriptionEndsAt != null
+                                ? t.SubscriptionEndsAt < suspendCutoff
+                                : t.TrialEndsAt < trialSuspendCutoff))
             .ToListAsync(ct);
 
         foreach (var tenant in toSuspend)

@@ -6,5 +6,10 @@ namespace ROCloud.Application.Common.Interfaces;
 /// </summary>
 public interface IWhatsAppService
 {
-    Task SendAsync(string mobile, string message, CancellationToken ct = default);
+    /// <summary>
+    /// Sends the message. Returns true only when the provider accepted it — false when unconfigured,
+    /// the master switch is off, or the provider rejected/errored. Failures are reported rather than
+    /// thrown so one bad number can't abort a bulk run; see <see cref="IEmailService.SendAsync"/>.
+    /// </summary>
+    Task<bool> SendAsync(string mobile, string message, CancellationToken ct = default);
 }

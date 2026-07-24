@@ -1,3 +1,4 @@
+using ROCloud.Application.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -47,7 +48,7 @@ public class AmcReminderJob
             return;
         }
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = AppTimeZone.Today(DateTime.UtcNow);
         var until = today.AddDays(_leadDays);
 
         await _runner.ForEachTenantAsync(async (sp, tenantId, token) =>

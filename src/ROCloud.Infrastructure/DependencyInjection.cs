@@ -18,6 +18,18 @@ namespace ROCloud.Infrastructure;
 
 public static class DependencyInjection
 {
+    /// <summary>
+    /// Ceiling on any outbound third-party call. HttpClient's own default is 100 seconds, which on a
+    /// single-node host means one unresponsive provider can pin request threads until the pool is
+    /// exhausted and the API stops answering. These calls are all "send a message" / "create an
+    /// order" round-trips that normally finish in well under a second; a provider that has not
+    /// answered in ten has failed, and failing fast is what keeps the rest of the API up.
+    /// </summary>
+    private static readonly TimeSpan ExternalCallTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>Razorpay sits in the interactive checkout path — see the registration below.</summary>
+    private static readonly TimeSpan PaymentCallTimeout = TimeSpan.FromSeconds(20);
+
     public static IServiceCollection AddInfrastructureServices(
         this IServiceCollection services, IConfiguration configuration)
     {
@@ -29,7 +41,16 @@ public static class DependencyInjection
 
         services.AddScoped<TenantConnectionInterceptor>();
         services.AddDbContext<AppDbContext>((sp, options) =>
-            options.UseNpgsql(connectionString)
+            options.UseNpgsql(connectionString, npgsql => npgsql
+                       // Default to split queries. A handful of reads (GetOrderById, GetDeliveryDetail)
+                       // Include two collection navigations at once; as a single JOIN those return
+                       // |collectionA| × |collectionB| rows with the whole parent payload duplicated on
+                       // every one. Set here rather than per-query with AsSplitQuery() because that
+                       // extension lives in EF Core *Relational*, and the Application layer references
+                       // only provider-agnostic EF Core so its handlers stay testable on the InMemory
+                       // provider. Only queries with collection Includes are affected — the paginated
+                       // list endpoints all project to DTOs and never materialise a collection graph.
+                       .UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery))
                    .AddInterceptors(sp.GetRequiredService<TenantConnectionInterceptor>()));
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
@@ -50,9 +71,9 @@ public static class DependencyInjection
         // so every outgoing email gets the shared HTML shell + plain-text alternative.
         var useResend = string.Equals(configuration["Email:Provider"], "Resend", StringComparison.OrdinalIgnoreCase);
         if (useResend)
-            services.AddHttpClient<ResendEmailService>();
+            services.AddHttpClient<ResendEmailService>(c => c.Timeout = ExternalCallTimeout);
         else
-            services.AddScoped<SendGridEmailService>();
+            services.AddHttpClient<SendGridEmailService>(c => c.Timeout = ExternalCallTimeout);
         services.AddScoped<IEmailBrandContext, EmailBrandContext>();
         services.AddScoped<IEmailService>(sp => new BrandedEmailService(
             useResend
@@ -61,8 +82,8 @@ public static class DependencyInjection
             sp.GetRequiredService<IEmailBrandContext>(),
             sp.GetRequiredService<Application.Common.Settings.IAppSettings>(),
             sp.GetRequiredService<ILogger<BrandedEmailService>>()));
-        services.AddHttpClient<ISmsService, Msg91SmsService>();
-        services.AddHttpClient<IWhatsAppService, Msg91WhatsAppService>();
+        services.AddHttpClient<ISmsService, Msg91SmsService>(c => c.Timeout = ExternalCallTimeout);
+        services.AddHttpClient<IWhatsAppService, Msg91WhatsAppService>(c => c.Timeout = ExternalCallTimeout);
 
         // Background jobs (guide §14) — registered for DI resolution by Hangfire.
         services.AddScoped<BackgroundJobs.TenantJobRunner>();
@@ -83,7 +104,9 @@ public static class DependencyInjection
         services.AddScoped<IBackgroundJobService, BackgroundJobs.HangfireJobService>();
 
         // Razorpay (guide §10) — raw HttpClient, no SDK. PCI scope stays with Razorpay (§10.18).
-        services.AddHttpClient<IRazorpayService, RazorpayService>();
+        // A little more headroom than the other integrations: this one is in the checkout path and a
+        // spurious timeout here leaves an unpaid orphan order on Razorpay's side.
+        services.AddHttpClient<IRazorpayService, RazorpayService>(c => c.Timeout = PaymentCallTimeout);
 
         // Invoice PDF generation (guide §10) via QuestPDF.
         services.AddSingleton<IInvoicePdfGenerator, ROCloud.Infrastructure.Pdf.InvoicePdfGenerator>();

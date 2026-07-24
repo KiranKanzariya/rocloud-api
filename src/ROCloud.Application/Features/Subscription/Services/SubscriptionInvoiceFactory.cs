@@ -19,16 +19,23 @@ public static class SubscriptionInvoiceStatus
 /// </summary>
 public static class SubscriptionInvoiceFactory
 {
+    /// <param name="periodEnd">
+    /// Explicit end of the billed period. Defaults to one cycle after <paramref name="periodStart"/>.
+    /// Pass it when the term was stretched by locked-out days credited back
+    /// (<see cref="SubscriptionTermCalculator"/>), so the invoice states the period the tenant actually
+    /// receives instead of a nominal cycle that ends earlier.
+    /// </param>
     public static async Task<SubscriptionInvoice> BuildAsync(
         IAppDbContext db, Tenant tenant, Plan plan, string billingCycle,
-        DateOnly periodStart, string status, string? description, CancellationToken ct)
+        DateOnly periodStart, string status, string? description, CancellationToken ct,
+        DateOnly? periodEnd = null)
     {
         var yearly = string.Equals(billingCycle, "Yearly", StringComparison.OrdinalIgnoreCase);
         var gross = yearly ? plan.YearlyPrice : plan.MonthlyPrice;
         var discount = SubscriptionDiscountCalculator.Discount(
             tenant.SubscriptionDiscountType, tenant.SubscriptionDiscountValue, gross);
         var amount = Math.Max(0m, gross - discount);
-        var periodEnd = yearly ? periodStart.AddYears(1) : periodStart.AddMonths(1);
+        var resolvedEnd = periodEnd ?? (yearly ? periodStart.AddYears(1) : periodStart.AddMonths(1));
 
         return new SubscriptionInvoice
         {
@@ -38,7 +45,7 @@ public static class SubscriptionInvoiceFactory
             PlanType = plan.PlanType.ToString(),
             BillingCycle = yearly ? "Yearly" : "Monthly",
             PeriodStart = periodStart,
-            PeriodEnd = periodEnd,
+            PeriodEnd = resolvedEnd,
             GrossAmount = gross,
             DiscountAmount = discount,
             Amount = amount,

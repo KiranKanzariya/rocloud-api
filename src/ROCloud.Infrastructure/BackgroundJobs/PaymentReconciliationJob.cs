@@ -1,3 +1,4 @@
+using Hangfire;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -22,6 +23,14 @@ public class PaymentReconciliationJob
         _logger = logger;
     }
 
+    /// <summary>
+    /// Reconciles every tenant's pending payments. Serialised: the schedule fires every 15 minutes and
+    /// each run makes one live Razorpay round-trip per pending payment across every tenant, so a slow
+    /// run can still be in flight when the next is due. Without this, two runs would resolve the same
+    /// payments concurrently and race each other's writes. A second run that finds the lock held is
+    /// dropped rather than queued — the next tick picks the work up anyway.
+    /// </summary>
+    [DisableConcurrentExecution(timeoutInSeconds: 0)]
     public async Task ExecuteAsync(CancellationToken ct = default)
     {
         await _runner.ForEachTenantAsync(async (sp, tenantId, token) =>

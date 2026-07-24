@@ -134,12 +134,19 @@ public class UpdateDeliveryStatusCommandHandler : IRequestHandler<UpdateDelivery
                 break;
         }
 
+        // The delivery/inventory movement and the re-settlement it causes are one fact — commit both
+        // or neither, so a sync failure can't leave stock moved and doorstep cash recorded while the
+        // customer's invoices still read unpaid. Guarded for the non-relational in-memory test provider.
+        await using var tx = _db.IsRelational ? await _db.BeginTransactionAsync(ct) : null;
+
         await _db.SaveChangesAsync(ct);
 
         // Delivering changes what the customer owes in two ways at once: the order becomes an
         // obligation, and any doorstep cash becomes a payment. Re-settle their invoices against both.
         if (delivery.Order?.CustomerId is { } deliveredFor)
             await Payments.InvoiceAllocationSync.SyncAsync(_db, deliveredFor, ct);
+
+        if (tx is not null) await tx.CommitAsync(ct);
     }
 
     private async Task ApplyDeliveredAsync(

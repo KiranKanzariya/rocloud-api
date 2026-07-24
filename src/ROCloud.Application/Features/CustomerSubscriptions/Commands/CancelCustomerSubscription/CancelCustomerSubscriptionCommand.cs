@@ -1,3 +1,4 @@
+using ROCloud.Application.Common;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Exceptions;
@@ -21,7 +22,7 @@ public class CancelCustomerSubscriptionCommandHandler : IRequestHandler<CancelCu
             ?? throw new NotFoundException("CustomerSubscription", request.Id);
 
         subscription.IsActive = false;
-        subscription.EndDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        subscription.EndDate = AppTimeZone.Today(DateTime.UtcNow);
         await _db.SaveChangesAsync(ct);
     }
 }

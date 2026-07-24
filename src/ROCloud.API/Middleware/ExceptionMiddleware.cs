@@ -43,6 +43,7 @@ public class ExceptionMiddleware
             NotFoundException => (StatusCodes.Status404NotFound, "NOT_FOUND"),
             InvalidCredentialsException => (StatusCodes.Status401Unauthorized, "INVALID_CREDENTIALS"),
             AccountLockedException => (StatusCodes.Status429TooManyRequests, "ACCOUNT_LOCKED"),
+            TenantBlockedException => (StatusCodes.Status403Forbidden, "TENANT_BLOCKED"),
             ForbiddenAccessException => (StatusCodes.Status403Forbidden, "FORBIDDEN"),
             PlanLimitException => (StatusCodes.Status403Forbidden, "PLAN_LIMIT_REACHED"),
             UnauthorizedAccessException => (StatusCodes.Status403Forbidden, "FORBIDDEN"),

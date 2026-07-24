@@ -1,3 +1,4 @@
+using ROCloud.Application.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -49,7 +50,7 @@ public class AdvanceOrderReminderJob
             return;
         }
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = AppTimeZone.Today(DateTime.UtcNow);
         var from = today.AddDays(1);            // day-before → tomorrow onward, never today
         var until = today.AddDays(_leadDays);
 

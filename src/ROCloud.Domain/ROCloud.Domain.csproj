@@ -5,6 +5,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- NU1902: transitive AngleSharp advisory reported through the referencing projects. See the
+         fuller note in ROCloud.Application.csproj. Warn-don't-fail, so it stays visible. -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1902</WarningsNotAsErrors>
   </PropertyGroup>
 
 </Project>

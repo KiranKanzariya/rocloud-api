@@ -1,3 +1,4 @@
+using ROCloud.Application.Common;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Interfaces;
@@ -23,7 +24,7 @@ public class GetOutstandingDuesQueryHandler
     public async Task<IReadOnlyList<OutstandingDueDto>> Handle(
         GetOutstandingDuesQuery request, CancellationToken ct)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = AppTimeZone.Today(DateTime.UtcNow);
         var cutoff = today.AddDays(-Math.Max(0, request.OverdueDays));
 
         // PaidAmount and Status are maintained on write by InvoiceAllocationSync, so an invoice the

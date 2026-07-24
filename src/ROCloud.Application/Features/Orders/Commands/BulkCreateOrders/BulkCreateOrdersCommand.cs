@@ -1,3 +1,4 @@
+using ROCloud.Application.Common;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -33,7 +34,7 @@ public class BulkCreateOrdersCommandHandler : IRequestHandler<BulkCreateOrdersCo
 
     public async Task<BulkCreateResultDto> Handle(BulkCreateOrdersCommand request, CancellationToken ct)
     {
-        var targetDate = request.TargetDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var targetDate = request.TargetDate ?? AppTimeZone.Today(DateTime.UtcNow);
 
         var subscriptions = await _db.CustomerSubscriptions
             .Include(s => s.Customer)

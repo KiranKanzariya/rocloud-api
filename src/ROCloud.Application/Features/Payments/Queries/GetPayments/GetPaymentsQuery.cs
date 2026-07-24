@@ -64,7 +64,8 @@ public class GetPaymentsQueryHandler : IRequestHandler<GetPaymentsQuery, PagedRe
                 p.Status.ToString(),
                 p.ReferenceNumber,
                 p.CollectedBy,
-                p.PaidAt))
+                p.PaidAt,
+                p.Notes))
             .ToListAsync(ct);
 
         return new PagedResult<PaymentListItemDto>(items, total, page, pageSize);

@@ -26,7 +26,7 @@ public class Msg91WhatsAppService : IWhatsAppService
         _logger = logger;
     }
 
-    public async Task SendAsync(string mobile, string message, CancellationToken ct = default)
+    public async Task<bool> SendAsync(string mobile, string message, CancellationToken ct = default)
     {
         // MSG91 wants country-code + number, digits only (e.g. 919876543210).
         var recipient = MobileFormat.ToMsg91(mobile);
@@ -34,7 +34,7 @@ public class Msg91WhatsAppService : IWhatsAppService
         if (!_settings.WhatsAppEnabled)
         {
             _logger.LogInformation("[WhatsApp not sent — disabled via Notifications:WhatsAppEnabled] To={Mobile}", recipient);
-            return;
+            return false;
         }
 
         var authKey = _config["MSG91:AuthKey"];
@@ -42,7 +42,7 @@ public class Msg91WhatsAppService : IWhatsAppService
         if (string.IsNullOrWhiteSpace(authKey) || string.IsNullOrWhiteSpace(fromNumber))
         {
             _logger.LogInformation("[WhatsApp not sent — MSG91 unconfigured] To={Mobile}", recipient);
-            return;
+            return false;
         }
 
         try
@@ -62,12 +62,15 @@ public class Msg91WhatsAppService : IWhatsAppService
             req.Headers.Add("authkey", authKey);
 
             using var resp = await _http.SendAsync(req, ct);
-            if (!resp.IsSuccessStatusCode)
-                _logger.LogError("MSG91 WhatsApp failed ({Status}) to {Mobile}", resp.StatusCode, mobile);
+            if (resp.IsSuccessStatusCode) return true;
+
+            _logger.LogError("MSG91 WhatsApp failed ({Status}) to {Mobile}", resp.StatusCode, mobile);
+            return false;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "MSG91 WhatsApp error to {Mobile}", mobile);
+            return false;
         }
     }
 }

@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
+using ROCloud.Application.Common.Settings;
 using ROCloud.Application.Features.Subscription.Services;
 using ROCloud.Domain.Entities.Platform;
 using ROCloud.Domain.Enums;
@@ -22,15 +23,17 @@ public class PayInvoiceCompleteCommandHandler : IRequestHandler<PayInvoiceComple
     private readonly ITenantContext _tenant;
     private readonly IRazorpayService _razorpay;
     private readonly ISubscriptionInvoiceDelivery _invoiceDelivery;
+    private readonly IAppSettings _settings;
 
     public PayInvoiceCompleteCommandHandler(
         IAppDbContext db, ITenantContext tenant, IRazorpayService razorpay,
-        ISubscriptionInvoiceDelivery invoiceDelivery)
+        ISubscriptionInvoiceDelivery invoiceDelivery, IAppSettings settings)
     {
         _db = db;
         _tenant = tenant;
         _razorpay = razorpay;
         _invoiceDelivery = invoiceDelivery;
+        _settings = settings;
     }
 
     public async Task Handle(PayInvoiceCompleteCommand request, CancellationToken ct)
@@ -76,10 +79,15 @@ public class PayInvoiceCompleteCommandHandler : IRequestHandler<PayInvoiceComple
         invoice.RazorpayOrderId = request.OrderId ?? invoice.RazorpayOrderId;
         invoice.RazorpayPaymentId = paymentId;
 
-        // Extend the subscription by one cycle (Option A basis rule) and reactivate.
+        // Extend by one cycle of USABLE access and reactivate — grace days are billed, locked-out days
+        // are handed back (see SubscriptionTermCalculator).
         var yearly = string.Equals(invoice.BillingCycle, "Yearly", StringComparison.OrdinalIgnoreCase);
-        var basis = tenant.SubscriptionEndsAt is { } end && end > DateTime.UtcNow ? end : DateTime.UtcNow;
-        tenant.SubscriptionEndsAt = yearly ? basis.AddYears(1) : basis.AddMonths(1);
+        tenant.SubscriptionEndsAt = SubscriptionTermCalculator.NextEnd(
+            tenant.SubscriptionEndsAt, yearly, _settings.SubscriptionOverdueGraceDays, DateTime.UtcNow);
+        // The invoice was written when the renewal fell due, assuming it would be paid on time. Restate
+        // its period to the term actually granted, so the document the owner keeps is not contradicted
+        // by the access they receive.
+        invoice.PeriodEnd = DateOnly.FromDateTime(tenant.SubscriptionEndsAt.Value);
         tenant.Status = TenantStatus.Active;
         tenant.TrialEndsAt = null;
 

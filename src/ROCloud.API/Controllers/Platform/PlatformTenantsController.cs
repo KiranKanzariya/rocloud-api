@@ -42,12 +42,17 @@ public class PlatformTenantsController : ControllerBase
         return Ok(ApiResponse<object>.Ok(new { id, status = "Suspended" }));
     }
 
+    /// <summary>
+    /// Reactivates a suspended tenant. Pass <c>creditSuspendedDays=true</c> to give a paying tenant back
+    /// the days it lost while blocked (use for an accidental / investigative suspension — not for one
+    /// imposed for non-payment or abuse). A lapsed subscription returns as Overdue, not Active.
+    /// </summary>
     [HttpPost("{id:guid}/reactivate")]
     [RequirePlatformRole("Support")]
-    public async Task<IActionResult> Reactivate(Guid id, CancellationToken ct)
+    public async Task<IActionResult> Reactivate(Guid id, [FromQuery] bool creditSuspendedDays, CancellationToken ct)
     {
-        await _mediator.Send(new SetTenantStatusCommand(id, "Active"), ct);
-        return Ok(ApiResponse<object>.Ok(new { id, status = "Active" }));
+        await _mediator.Send(new SetTenantStatusCommand(id, "Active", creditSuspendedDays), ct);
+        return Ok(ApiResponse<object>.Ok(new { id }));
     }
 
     [HttpPost("{id:guid}/change-plan")]

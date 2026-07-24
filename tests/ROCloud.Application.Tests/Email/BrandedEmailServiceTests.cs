@@ -12,10 +12,10 @@ public class BrandedEmailServiceTests
     private sealed class CapturingEmail : IEmailService
     {
         public string? Html;
-        public Task SendAsync(string to, string subject, string htmlBody, CancellationToken ct = default)
+        public Task<bool> SendAsync(string to, string subject, string htmlBody, CancellationToken ct = default)
         {
             Html = htmlBody;
-            return Task.CompletedTask;
+            return Task.FromResult(true);
         }
     }
 

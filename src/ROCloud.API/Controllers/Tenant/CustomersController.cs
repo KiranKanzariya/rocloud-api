@@ -1,3 +1,4 @@
+using ROCloud.Application.Common;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -132,7 +133,7 @@ public class CustomersController : ControllerBase
         var csv = await reader.ReadToEndAsync(ct);
 
         var result = await _mediator.Send(new ImportCustomersCommand(
-            csv, dryRun, cutoverDate ?? DateOnly.FromDateTime(DateTime.UtcNow)), ct);
+            csv, dryRun, cutoverDate ?? AppTimeZone.Today(DateTime.UtcNow)), ct);
         return Ok(ApiResponse<ImportCustomersResultDto>.Ok(result));
     }
 

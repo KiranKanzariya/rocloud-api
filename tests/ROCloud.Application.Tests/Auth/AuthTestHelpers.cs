@@ -66,6 +66,7 @@ public sealed class FakeAppSettings : IAppSettings
     public bool AmcReminderEnabled { get; init; } = true;
     public bool AdvanceOrderReminderEnabled { get; init; } = true;
     public int SubscriptionInvoiceLeadDays { get; init; } = 5;
+    public int SubscriptionOverdueGraceDays { get; init; } = 7;
 }
 
 public static class AuthTestHelpers

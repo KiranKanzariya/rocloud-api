@@ -34,8 +34,8 @@ public class UserTests
 
     private sealed class NullEmailService : IEmailService
     {
-        public Task SendAsync(string to, string subject, string htmlBody, CancellationToken ct = default)
-            => Task.CompletedTask;
+        public Task<bool> SendAsync(string to, string subject, string htmlBody, CancellationToken ct = default)
+            => Task.FromResult(true);
     }
 
     private static CreateUserCommandHandler NewCreateHandler(AppDbContext db, TenantContext ctx)

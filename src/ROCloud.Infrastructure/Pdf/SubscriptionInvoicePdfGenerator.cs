@@ -62,7 +62,11 @@ public class SubscriptionInvoicePdfGenerator : ISubscriptionInvoicePdfGenerator
                     right.Item().AlignRight().Text($"Invoice #: {m.InvoiceNumber}").Bold();
                     right.Item().AlignRight().Text($"Date: {m.InvoiceDate:dd MMM yyyy}").FontSize(9);
                     right.Item().AlignRight().Text($"Due: {m.PeriodStart:dd MMM yyyy}").FontSize(9);
-                    right.Item().AlignRight().Text($"Period: {m.PeriodStart:dd MMM} – {m.PeriodEnd:dd MMM yyyy}").FontSize(9);
+                    // PeriodEnd is EXCLUSIVE (access stops at that instant), but an invoice reads as an
+                    // inclusive range — printing it raw makes consecutive bills share a date and look
+                    // like a double charge for that day. Show the last day actually covered.
+                    var lastDay = m.PeriodEnd > m.PeriodStart ? m.PeriodEnd.AddDays(-1) : m.PeriodStart;
+                    right.Item().AlignRight().Text($"Period: {m.PeriodStart:dd MMM} – {lastDay:dd MMM yyyy}").FontSize(9);
 
                     right.Item().AlignRight().PaddingTop(3).Text(m.Paid ? "PAID" : "PAYMENT DUE")
                         .Bold().FontColor(m.Paid ? ColTeal : ColAmber);

@@ -87,20 +87,25 @@ public class PaymentReminderJob
                     $"({due.DaysOverdue} days overdue). Please clear your dues. Thank you.";
 
                 string? channelUsed = null;
+                // channelUsed is only set when the provider actually accepted the message. It gates the
+                // reminder_log write below, and that row suppresses re-reminding this customer for
+                // PaymentReminderMinIntervalDays — so recording a send that silently failed would mean
+                // the customer is never chased at all. A failure here leaves no row, and the next run
+                // retries.
                 if (whatsAppEnabled && !string.IsNullOrWhiteSpace(due.CustomerMobile))
                 {
                     var rendered = await templates.RenderAsync(
                         tenantId, "payment_reminder", due.CustomerLanguage, "WhatsApp", tokens, token);
-                    await whatsapp.SendAsync(due.CustomerMobile, rendered?.Body ?? defaultBody, token);
-                    channelUsed = "WhatsApp";
+                    if (await whatsapp.SendAsync(due.CustomerMobile, rendered?.Body ?? defaultBody, token))
+                        channelUsed = "WhatsApp";
                 }
                 else if (settings.EmailEnabled && !string.IsNullOrWhiteSpace(due.CustomerEmail))
                 {
                     var rendered = await templates.RenderAsync(
                         tenantId, "payment_reminder", due.CustomerLanguage, "Email", tokens, token);
                     var subject = rendered?.Subject ?? "Payment reminder";
-                    await email.SendAsync(due.CustomerEmail, subject, rendered?.Body ?? defaultBody, token);
-                    channelUsed = "Email";
+                    if (await email.SendAsync(due.CustomerEmail, subject, rendered?.Body ?? defaultBody, token))
+                        channelUsed = "Email";
                 }
 
                 if (channelUsed is not null)

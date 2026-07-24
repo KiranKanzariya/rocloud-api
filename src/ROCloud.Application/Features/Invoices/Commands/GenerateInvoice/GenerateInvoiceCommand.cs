@@ -1,3 +1,4 @@
+using ROCloud.Application.Common;
 using FluentValidation;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -80,7 +81,7 @@ public class GenerateInvoiceCommandHandler : IRequestHandler<GenerateInvoiceComm
         var taxAmount = Math.Round(taxable * gstRate, 2);
         var totalAmount = taxable + taxAmount;
 
-        var invoiceDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        var invoiceDate = AppTimeZone.Today(DateTime.UtcNow);
         var dueDate = invoiceDate.AddDays(request.DueInDays ?? _settings.InvoiceDueInDays);
 
         var invoice = new Invoice
@@ -110,10 +111,17 @@ public class GenerateInvoiceCommandHandler : IRequestHandler<GenerateInvoiceComm
         await InvoicePaymentReconciler.CreditPriorPaymentsAsync(
             _db, invoice, customer.Id, request.PeriodFrom, request.PeriodTo, ct);
 
+        // The invoice and its settlement against any advance the customer holds are one fact — commit
+        // both or neither, so a sync failure can't leave a Draft invoice showing ₹0 paid against an
+        // advance that already covers it. Guarded for the non-relational in-memory test provider.
+        await using var tx = _db.IsRelational ? await _db.BeginTransactionAsync(ct) : null;
+
         await _db.SaveChangesAsync(ct);
 
         // A brand-new invoice may already be covered by an advance the customer is holding.
         await Payments.InvoiceAllocationSync.SyncAsync(_db, customer.Id, ct);
+
+        if (tx is not null) await tx.CommitAsync(ct);
         return invoice.Id;
     }
 

@@ -84,15 +84,26 @@ public class ConfirmRazorpayPaymentCommandHandler : IRequestHandler<ConfirmRazor
                 if (!alreadySettled)
                     Payments.PaymentApplication.ApplyToInvoice(invoice, payment.Amount);
                 else
-                    payment.Notes = "Invoice already settled — possible duplicate payment, refund may be due.";
+                    // Appended, not assigned: the collector may already have written a note, and
+                    // overwriting it would destroy their record of why the payment was taken.
+                    payment.Notes = PaymentNotes.Append(payment.Notes, PaymentNotes.PossibleDuplicate);
             }
         }
+
+        // Marking the payment Completed and re-settling the customer's invoices against it are one
+        // fact, so they commit together. This matters more here than elsewhere: if the sync failed
+        // after the payment saved, Razorpay would retry the webhook, the Completed check at the top
+        // would short-circuit, and the sync would never re-run — the stale allocation would persist
+        // until the nightly job. Committing both or neither means a retry actually redoes the work.
+        await using var tx = _db.IsRelational ? await _db.BeginTransactionAsync(ct) : null;
 
         await _db.SaveChangesAsync(ct);
 
         // The money only becomes real now (the row was Pending until this point), so re-settle the
         // customer's invoices against it.
         await InvoiceAllocationSync.SyncAsync(_db, payment.CustomerId, ct);
+
+        if (tx is not null) await tx.CommitAsync(ct);
 
         _logger.LogInformation(
             "Razorpay payment {RpPaymentId} confirmed for local payment {PaymentId}",

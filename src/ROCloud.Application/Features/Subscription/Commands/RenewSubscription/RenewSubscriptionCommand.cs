@@ -76,7 +76,8 @@ public class RenewSubscriptionCommandHandler : IRequestHandler<RenewSubscription
                 _db, tenant, plan, cycle, DateOnly.FromDateTime(freeBasis), SubscriptionInvoiceStatus.Paid,
                 $"{plan.Name} plan — 1 {unit} (free renewal)", ct);
             _db.SubscriptionInvoices.Add(freeInvoice);   // no email; its PDF renders on demand
-            tenant.SubscriptionEndsAt = yearly ? freeBasis.AddYears(1) : freeBasis.AddMonths(1);
+            tenant.SubscriptionEndsAt = SubscriptionTermCalculator.NextEnd(
+                end, yearly, _settings.SubscriptionOverdueGraceDays, now);
             tenant.Status = TenantStatus.Active;
             await _db.SaveChangesAsync(ct);
             return Map(freeInvoice);

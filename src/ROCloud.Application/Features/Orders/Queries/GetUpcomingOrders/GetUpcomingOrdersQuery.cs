@@ -1,3 +1,4 @@
+using ROCloud.Application.Common;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Interfaces;
@@ -25,7 +26,7 @@ public class GetUpcomingOrdersQueryHandler
     public async Task<IReadOnlyList<UpcomingOrderDto>> Handle(
         GetUpcomingOrdersQuery request, CancellationToken ct)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = AppTimeZone.Today(DateTime.UtcNow);
         var horizon = today.AddDays(Math.Clamp(request.Days, 1, 365));
 
         // Only still-open bookings — a cancelled or already-delivered order isn't "upcoming".

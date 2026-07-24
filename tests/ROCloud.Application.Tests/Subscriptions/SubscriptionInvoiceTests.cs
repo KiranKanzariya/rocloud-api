@@ -72,7 +72,7 @@ public class SubscriptionInvoiceTests
         db.SubscriptionInvoices.Add(PendingInvoice(ctx.TenantId, "SEED-1"));
         await db.SaveChangesAsync();
 
-        await new CompleteUpgradeCommandHandler(db, ctx, new FakeRazorpayService(), new NoOpSubscriptionInvoiceDelivery())
+        await new CompleteUpgradeCommandHandler(db, ctx, new FakeRazorpayService(), new NoOpSubscriptionInvoiceDelivery(), new Auth.FakeAppSettings())
             .Handle(new CompleteUpgradeCommand("Pro", "Monthly"), CancellationToken.None);
 
         var invoices = await db.SubscriptionInvoices.Where(i => i.TenantId == ctx.TenantId).ToListAsync();
@@ -89,7 +89,7 @@ public class SubscriptionInvoiceTests
         db.SubscriptionInvoices.Add(invoice);
         await db.SaveChangesAsync();
 
-        await new PayInvoiceCompleteCommandHandler(db, ctx, new FakeRazorpayService(), new NoOpSubscriptionInvoiceDelivery())
+        await new PayInvoiceCompleteCommandHandler(db, ctx, new FakeRazorpayService(), new NoOpSubscriptionInvoiceDelivery(), new Auth.FakeAppSettings())
             .Handle(new PayInvoiceCompleteCommand(invoice.Id), CancellationToken.None);
 
         var paid = await db.SubscriptionInvoices.FirstAsync(i => i.Id == invoice.Id);
@@ -111,7 +111,7 @@ public class SubscriptionInvoiceTests
         var rp = new FakeRazorpayService { Configured = true };   // "order_x" not marked paid
 
         await Assert.ThrowsAsync<ValidationException>(() =>
-            new PayInvoiceCompleteCommandHandler(db, ctx, rp, new NoOpSubscriptionInvoiceDelivery())
+            new PayInvoiceCompleteCommandHandler(db, ctx, rp, new NoOpSubscriptionInvoiceDelivery(), new Auth.FakeAppSettings())
                 .Handle(new PayInvoiceCompleteCommand(invoice.Id, "order_x"), CancellationToken.None));
 
         Assert.Equal(SubscriptionInvoiceStatus.Pending,

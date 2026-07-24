@@ -39,7 +39,8 @@ public class GetCustomerByIdQueryHandler : IRequestHandler<GetCustomerByIdQuery,
             .Where(p => p.CustomerId == c.Id)
             .OrderByDescending(p => p.PaidAt)
             .Take(5)
-            .Select(p => new CustomerPaymentSummaryDto(p.Id, p.Amount, p.PaymentMethod.ToString(), p.PaidAt))
+            .Select(p => new CustomerPaymentSummaryDto(
+                p.Id, p.Amount, p.PaymentMethod.ToString(), p.PaidAt, p.Notes))
             .ToListAsync(ct);
 
         // Outstanding is a simple customer ledger (guide §9): everything they've been billed minus

@@ -1,3 +1,4 @@
+using ROCloud.Application.Common;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -22,7 +23,7 @@ public class DailyDeliveryRolloverJob
 
     public async Task ExecuteAsync(CancellationToken ct = default)
     {
-        var tomorrow = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(1);
+        var tomorrow = AppTimeZone.Today(DateTime.UtcNow).AddDays(1);
 
         await _runner.ForEachTenantAsync(async (sp, tenantId, token) =>
         {
