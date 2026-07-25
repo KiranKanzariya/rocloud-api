@@ -206,7 +206,7 @@ app.UseMiddleware<AuditMiddleware>();
 app.UseMiddleware<ExceptionMiddleware>();                 // catch everything below
 app.UseMiddleware<CorrelationIdMiddleware>();             // assign X-Request-Id, push to logs
 app.UseSecurityHeaders(SecurityHeadersExtensions.BuildRoCloudPolicies(
-    app.Configuration["App:ApiUrl"] ?? "https://api.rocloud.app",
+    app.Configuration["App:ApiUrl"] ?? "https://api.rocloud.in",
     int.TryParse(app.Configuration["SecurityHeaders:HstsMaxAgeSeconds"], out var hsts) ? hsts : 31_536_000));
 
 if (!app.Environment.IsDevelopment())

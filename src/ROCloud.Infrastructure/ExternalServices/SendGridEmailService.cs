@@ -42,7 +42,7 @@ public class SendGridEmailService : IEmailService
         }
 
         var from = new EmailAddress(
-            _config["SendGrid:FromEmail"] ?? "no-reply@rocloud.app",
+            _config["SendGrid:FromEmail"] ?? "no-reply@rocloud.in",
             _config["SendGrid:FromName"] ?? "ROCloud");
         var msg = MailHelper.CreateSingleEmail(
             from, new EmailAddress(to), subject, plainTextContent: EmailHtml.ToPlainText(htmlBody), htmlBody);

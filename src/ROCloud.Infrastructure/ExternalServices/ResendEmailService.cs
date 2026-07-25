@@ -38,7 +38,7 @@ public class ResendEmailService : IEmailService
             return false;
         }
 
-        var fromEmail = _config["Resend:FromEmail"] ?? "no-reply@rocloud.app";
+        var fromEmail = _config["Resend:FromEmail"] ?? "no-reply@rocloud.in";
         var fromName = _config["Resend:FromName"] ?? "ROCloud";
 
         // Dictionary (not an anonymous type) so "attachments" is only present when there are files —

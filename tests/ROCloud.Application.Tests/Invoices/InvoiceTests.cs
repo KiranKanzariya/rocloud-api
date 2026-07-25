@@ -25,13 +25,14 @@ public class InvoiceTests
 
     private static async Task<(Guid CustomerId, DateOnly From, DateOnly To)> SeedDeliveredOrdersAsync(AppDbContext db)
     {
-        // GST is owner-configurable per tenant; the handler reads it off the tenant row. Seed one with the
-        // defaults (GstEnabled=true, GstRate=0.18) so invoices carry the expected 18% GST.
+        // GST is owner-configurable per tenant; the handler reads it off the tenant row. GST now defaults
+        // OFF, so enable it explicitly here (registered tenant with a GSTIN) to exercise the 18% path.
         db.Tenants.Add(new Tenant
         {
             Id = TenantA, Name = "Acme Water", Subdomain = "acme",
             OwnerName = "Owner", OwnerEmail = "owner@acme.test", OwnerMobile = "9999999999",
-            Status = TenantStatus.Active, DefaultLanguage = "en"
+            Status = TenantStatus.Active, DefaultLanguage = "en",
+            GstEnabled = true, GstRate = 0.18m, GstNumber = "24AAAAA0000A1Z5"
         });
 
         var customerId = Guid.NewGuid();

@@ -25,8 +25,13 @@ public class Tenant : BaseEntity
     public string? RazorpayCustomerId { get; set; }
     public string? GstNumber { get; set; }
 
-    /// <summary>Whether GST is charged on this tenant's customer invoices (owner-configurable, §24).</summary>
-    public bool GstEnabled { get; set; } = true;
+    /// <summary>
+    /// Whether GST is charged on this tenant's customer invoices (owner-configurable, §24). Defaults
+    /// OFF: most small water suppliers are not GST-registered, and a new tenant that invoices before
+    /// touching settings must not emit a tax invoice with no GSTIN. The owner opts in once registered —
+    /// and cannot enable it without a GstNumber (see UpdateTenantSettingsCommand).
+    /// </summary>
+    public bool GstEnabled { get; set; }
 
     /// <summary>GST rate as a fraction (e.g. 0.18 = 18%). Applied only when <see cref="GstEnabled"/>.</summary>
     public decimal GstRate { get; set; } = 0.18m;

@@ -22,10 +22,10 @@ public sealed class AppSettings : IAppSettings
     private bool Bool(string key, bool fallback) =>
         bool.TryParse(_config[key], out var v) ? v : fallback;
 
-    public string WebUrl => _config["App:WebUrl"] is { Length: > 0 } u ? u : "https://app.rocloud.app";
+    public string WebUrl => _config["App:WebUrl"] is { Length: > 0 } u ? u : "https://app.rocloud.in";
     public string TimeZone => _config["App:TimeZone"] is { Length: > 0 } tz ? tz : "Asia/Kolkata";
     public string TenantUrlFormat =>
-        _config["App:TenantUrlFormat"] is { Length: > 0 } u ? u : "https://{subdomain}.rocloud.app";
+        _config["App:TenantUrlFormat"] is { Length: > 0 } u ? u : "https://{subdomain}.rocloud.in";
     public int RefreshTokenExpiryDays => Int("Jwt:RefreshTokenExpiryDays", 30);
     public int TrialDays => Int("Tenant:TrialDays", 14);
     public int MaxLoginAttempts => Int("Security:MaxLoginAttempts", 5);

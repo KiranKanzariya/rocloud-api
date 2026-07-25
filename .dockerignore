@@ -1,0 +1,19 @@
+# Keep the Docker build context small AND clean.
+#
+# bin/ and obj/ matter most: they hold build output from your Windows machine.
+# Copying them into a Linux build makes the build fail with confusing "path not
+# found" errors, because they record absolute Windows paths.
+**/bin/
+**/obj/
+**/.vs/
+**/.vscode/
+**/node_modules/
+.git/
+.gitignore
+tests/
+*.user
+*.suo
+**/App_Data/
+README.md
+openapi.json
+build.sh

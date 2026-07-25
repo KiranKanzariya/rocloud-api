@@ -19,7 +19,7 @@ public interface IAppSettings
 
     /// <summary>
     /// Tenant portal URL template with a <c>{subdomain}</c> placeholder, used to tell a new owner
-    /// where to sign in (App:TenantUrlFormat). Default <c>https://{subdomain}.rocloud.app</c>.
+    /// where to sign in (App:TenantUrlFormat). Default <c>https://{subdomain}.rocloud.in</c>.
     /// </summary>
     string TenantUrlFormat { get; }
 

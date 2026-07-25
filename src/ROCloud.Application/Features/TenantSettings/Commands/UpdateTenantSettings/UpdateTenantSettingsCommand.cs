@@ -3,6 +3,7 @@ using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
+using ValidationException = ROCloud.Application.Common.Exceptions.ValidationException;
 
 namespace ROCloud.Application.Features.TenantSettings.Commands.UpdateTenantSettings;
 
@@ -62,6 +63,18 @@ public class UpdateTenantSettingsCommandHandler : IRequestHandler<UpdateTenantSe
     {
         var t = await _db.Tenants.FirstOrDefaultAsync(x => x.Id == _tenant.TenantId, ct)
                 ?? throw new NotFoundException("Tenant", _tenant.TenantId);
+
+        // You cannot legally charge GST without a registration number, so GST must not be TURNED ON
+        // without a GstNumber — otherwise the tenant issues a "tax invoice" with no GSTIN, which is an
+        // improper document. Guarded on the OFF→ON transition only: a tenant already in this state (from
+        // before this rule) is not blocked from saving unrelated fields; they clear it by adding a GSTIN
+        // or turning GST off. Run audit-gst-enabled-without-gstin.sql to find any such tenants.
+        var enablingGst = request.GstEnabled && !t.GstEnabled;
+        if (enablingGst && string.IsNullOrWhiteSpace(request.GstNumber))
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["gstNumber"] = ["Enter your 15-digit GSTIN to charge GST, or keep GST off."]
+            });
 
         t.Name = request.Name;
         t.GstNumber = string.IsNullOrWhiteSpace(request.GstNumber) ? null : request.GstNumber;
