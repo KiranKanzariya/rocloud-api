@@ -55,6 +55,7 @@ public sealed class FakeAppSettings : IAppSettings
     public decimal DefaultGstRate => 0.18m;
     public int InvoiceDueInDays => 15;
     public int InvoiceLinkExpiryDays => 7;
+    public int BackdateWindowDays { get; init; } = 5;
     public long DeliveryProofMaxBytes => 5 * 1024 * 1024;
     // Notification channel toggles default on; tests flip them via object initializer.
     public bool EmailEnabled { get; init; } = true;

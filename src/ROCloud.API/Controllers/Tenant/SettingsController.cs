@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ROCloud.API.Filters;
 using ROCloud.Application.Common.Models;
+using ROCloud.Application.Common.Settings;
 using ROCloud.Application.Features.TenantSettings.Commands.UpdateTenantSettings;
 using ROCloud.Application.Features.TenantSettings.Dtos;
 using ROCloud.Application.Features.TenantSettings.Queries.GetBillingSettings;
@@ -21,8 +22,24 @@ namespace ROCloud.API.Controllers.Tenant;
 public class SettingsController : ControllerBase
 {
     private readonly IMediator _mediator;
+    private readonly IAppSettings _settings;
 
-    public SettingsController(IMediator mediator) => _mediator = mediator;
+    public SettingsController(IMediator mediator, IAppSettings settings)
+    {
+        _mediator = mediator;
+        _settings = settings;
+    }
+
+    /// <summary>
+    /// The platform backdating window (Billing:BackdateWindowDays) — how many days back an order, payment
+    /// or jar return may be dated. Any authenticated tenant user may read it (it's a non-sensitive limit,
+    /// not tenant data), so the order/payment/return date pickers can grey out older days to match exactly
+    /// what the API enforces. Kept off the billing endpoint so roles without Invoices/BusinessProfile
+    /// permission (e.g. a collector or storekeeper) can still read it.
+    /// </summary>
+    [HttpGet("backdate-window")]
+    public IActionResult GetBackdateWindow()
+        => Ok(ApiResponse<object>.Ok(new { backdateWindowDays = _settings.BackdateWindowDays }));
 
     [HttpGet]
     [RequirePermission("BusinessProfile.View")]

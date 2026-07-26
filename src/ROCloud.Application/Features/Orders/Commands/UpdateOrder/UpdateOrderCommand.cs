@@ -1,8 +1,10 @@
 using FluentValidation;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using ROCloud.Application.Common;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
+using ROCloud.Application.Common.Settings;
 using ROCloud.Application.Features.Orders.Dtos;
 using ROCloud.Domain.Entities.Tenant;
 using ROCloud.Domain.Enums;
@@ -54,11 +56,13 @@ public class UpdateOrderCommandHandler : IRequestHandler<UpdateOrderCommand>
 
     private readonly IAppDbContext _db;
     private readonly ITenantContext _tenant;
+    private readonly IAppSettings _settings;
 
-    public UpdateOrderCommandHandler(IAppDbContext db, ITenantContext tenant)
+    public UpdateOrderCommandHandler(IAppDbContext db, ITenantContext tenant, IAppSettings settings)
     {
         _db = db;
         _tenant = tenant;
+        _settings = settings;
     }
 
     public async Task Handle(UpdateOrderCommand request, CancellationToken ct)
@@ -132,6 +136,11 @@ public class UpdateOrderCommandHandler : IRequestHandler<UpdateOrderCommand>
         order.Notes = request.Notes;
         if (request.OrderDate is { } date)
         {
+            // Same backdating rules as creation: no older than the window, not into an already-invoiced
+            // period, future allowed (rescheduling to an advance date).
+            BackdateGuard.Validate(date, _settings.BackdateWindowDays, "orderDate", allowFuture: true);
+            await BackdatedOrderGuard.EnsureNotInBilledPeriodAsync(_db, order.CustomerId, date, ct);
+
             order.OrderDate = date;
             if (order.Delivery is { } delivery)
                 delivery.ScheduledDate = date; // keep the 1:1 delivery's schedule in sync

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using ROCloud.API.Filters;
 using ROCloud.Application.Common.Models;
 using ROCloud.Application.Features.Inventory.Commands.AddInventoryMovement;
+using ROCloud.Application.Features.Inventory.Commands.RecordCustomerReturn;
 using ROCloud.Application.Features.Inventory.Commands.ReconcileInventory;
 using ROCloud.Application.Features.Inventory.Dtos;
 using ROCloud.Application.Features.Inventory.Queries.GetInventory;
@@ -41,6 +42,19 @@ public class InventoryController : ControllerBase
     [HttpPost("movements")]
     [RequirePermission("Inventory.Manage")]
     public async Task<IActionResult> AddMovement([FromBody] AddInventoryMovementCommand command, CancellationToken ct)
+    {
+        var id = await _mediator.Send(command, ct);
+        return Ok(ApiResponse<object>.Ok(new { id }));
+    }
+
+    /// <summary>
+    /// Records empty jars a customer handed back with no delivery to attach them to (moved house, missed
+    /// on the day). May be backdated within the platform window. Reduces the customer's outstanding jars.
+    /// </summary>
+    [HttpPost("returns")]
+    [RequirePermission("Inventory.Manage")]
+    public async Task<IActionResult> RecordCustomerReturn(
+        [FromBody] RecordCustomerReturnCommand command, CancellationToken ct)
     {
         var id = await _mediator.Send(command, ct);
         return Ok(ApiResponse<object>.Ok(new { id }));

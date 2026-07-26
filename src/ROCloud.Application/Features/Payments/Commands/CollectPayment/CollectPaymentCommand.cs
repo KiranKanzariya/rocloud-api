@@ -2,8 +2,10 @@ using FluentValidation;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using ROCloud.Application.Common;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
+using ROCloud.Application.Common.Settings;
 using ROCloud.Domain.Entities.Tenant;
 using ROCloud.Domain.Enums;
 using ValidationException = ROCloud.Application.Common.Exceptions.ValidationException;
@@ -21,7 +23,11 @@ public sealed record CollectPaymentCommand(
     decimal Amount,
     string PaymentMethod,
     string? ReferenceNumber,
-    string? Notes) : IRequest<Guid>;
+    string? Notes,
+    // The day the money was actually received. Omitted → now. May be backdated within the platform
+    // window (Billing:BackdateWindowDays); no "already-invoiced period" gate, because a payment settles
+    // against the customer's oldest dues (InvoiceAllocationSync), not against a specific billing period.
+    DateOnly? PaidOn = null) : IRequest<Guid>;
 
 public class CollectPaymentCommandValidator : AbstractValidator<CollectPaymentCommand>
 {
@@ -41,20 +47,26 @@ public class CollectPaymentCommandHandler : IRequestHandler<CollectPaymentComman
     private readonly IAppDbContext _db;
     private readonly ITenantContext _tenant;
     private readonly ICurrentUserService _currentUser;
+    private readonly IAppSettings _settings;
     private readonly ILogger<CollectPaymentCommandHandler> _logger;
 
     public CollectPaymentCommandHandler(
         IAppDbContext db, ITenantContext tenant, ICurrentUserService currentUser,
-        ILogger<CollectPaymentCommandHandler> logger)
+        IAppSettings settings, ILogger<CollectPaymentCommandHandler> logger)
     {
         _db = db;
         _tenant = tenant;
         _currentUser = currentUser;
+        _settings = settings;
         _logger = logger;
     }
 
     public async Task<Guid> Handle(CollectPaymentCommand request, CancellationToken ct)
     {
+        // A backdated collection may sit within the window; never in the future. No period gate — the
+        // payment reconciles against the customer's oldest dues regardless of which month it lands in.
+        BackdateGuard.Validate(request.PaidOn, _settings.BackdateWindowDays, "paidOn");
+
         var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == request.CustomerId, ct)
                        ?? throw new NotFoundException("Customer", request.CustomerId);
 
@@ -83,7 +95,8 @@ public class CollectPaymentCommandHandler : IRequestHandler<CollectPaymentComman
             Status = PaymentStatus.Completed,
             ReferenceNumber = request.ReferenceNumber,
             CollectedBy = _currentUser.UserId,
-            PaidAt = DateTime.UtcNow,
+            // Backdated → midday of that calendar day (app zone) so it reports on the right day; else now.
+            PaidAt = request.PaidOn is { } paidOn ? AppTimeZone.MiddayUtc(paidOn) : DateTime.UtcNow,
             Notes = request.Notes
         };
         _db.Payments.Add(payment);

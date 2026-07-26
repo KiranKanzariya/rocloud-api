@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using ROCloud.Application.Common.Interfaces;
 using ROCloud.Application.Common.Models;
+using ROCloud.Application.Tests.Auth;
 using ROCloud.Application.Features.Invoices.Dtos;
 using ROCloud.Application.Features.Invoices.Queries.GetInvoices;
 using ROCloud.Application.Features.Payments;
@@ -92,7 +93,7 @@ public class ObligationAllocationTests
 
     /// <summary>The customer-page modal sends no invoiceId and no orderId — that is the whole point.</summary>
     private static Task CollectOnCustomerPageAsync(AppDbContext db, TenantContext ctx, Guid customerId, decimal amount) =>
-        new CollectPaymentCommandHandler(db, ctx, new FakeCurrentUser(), NullLogger<CollectPaymentCommandHandler>.Instance)
+        new CollectPaymentCommandHandler(db, ctx, new FakeCurrentUser(), new FakeAppSettings(), NullLogger<CollectPaymentCommandHandler>.Instance)
             .Handle(new CollectPaymentCommand(
                 customerId, null, null, amount, nameof(PaymentMethod.Cash), null, null), CancellationToken.None);
 
@@ -243,7 +244,7 @@ public class ObligationAllocationTests
         var order = AddDeliveredOrder(db, customerId, 200m, 2);
         await db.SaveChangesAsync();
 
-        await new CollectPaymentCommandHandler(db, ctx, new FakeCurrentUser(), NullLogger<CollectPaymentCommandHandler>.Instance)
+        await new CollectPaymentCommandHandler(db, ctx, new FakeCurrentUser(), new FakeAppSettings(), NullLogger<CollectPaymentCommandHandler>.Instance)
             .Handle(new CollectPaymentCommand(
                 customerId, invoiceId, null, 500m, nameof(PaymentMethod.Cash), null, null), CancellationToken.None);
 

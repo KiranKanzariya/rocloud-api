@@ -35,6 +35,7 @@ public sealed class AppSettings : IAppSettings
         decimal.TryParse(_config["Billing:GstRate"], out var v) ? v : 0.18m;
     public int InvoiceDueInDays => Int("Billing:DefaultDueInDays", 15);
     public int InvoiceLinkExpiryDays => Int("Billing:InvoiceLinkExpiryDays", 7);
+    public int BackdateWindowDays => Int("Billing:BackdateWindowDays", 5);
     public long DeliveryProofMaxBytes => Long("Files:DeliveryProofMaxBytes", 5 * 1024 * 1024);
     public bool EmailEnabled => Bool("Notifications:EmailEnabled", true);
     public bool SmsEnabled => Bool("Notifications:SmsEnabled", true);

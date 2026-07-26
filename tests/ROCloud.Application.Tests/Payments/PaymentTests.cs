@@ -3,8 +3,10 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using ROCloud.Application.Common;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
+using ROCloud.Application.Tests.Auth;
 using ROCloud.Application.Features.Payments.Commands.CollectPayment;
 using ROCloud.Application.Features.Payments.Commands.ConfirmRazorpayPayment;
 using ROCloud.Domain.Entities.Platform;
@@ -77,7 +79,7 @@ public class PaymentTests
 
         var handler = new CollectPaymentCommandHandler(
             db, ctx, new FakeCurrentUser { UserId = Guid.NewGuid(), TenantId = TenantA },
-            NullLogger<CollectPaymentCommandHandler>.Instance);
+            new FakeAppSettings(), NullLogger<CollectPaymentCommandHandler>.Instance);
 
         // Partial payment → PartiallyPaid.
         await handler.Handle(new CollectPaymentCommand(
@@ -92,6 +94,60 @@ public class PaymentTests
         var afterFull = await db.Invoices.FirstAsync(i => i.Id == invoiceId);
         Assert.Equal(100m, afterFull.PaidAmount);
         Assert.Equal(InvoiceStatus.Paid, afterFull.Status);
+    }
+
+    [Fact]
+    public async Task CollectPayment_BackdatedWithinWindow_StampsThatDay()
+    {
+        var (db, ctx) = NewDb();
+        var customerId = Guid.NewGuid();
+        db.Customers.Add(new Customer { Id = customerId, TenantId = TenantA, Name = "Ravi", Mobile = "9" });
+        await db.SaveChangesAsync();
+
+        var handler = new CollectPaymentCommandHandler(
+            db, ctx, new FakeCurrentUser { UserId = Guid.NewGuid(), TenantId = TenantA },
+            new FakeAppSettings { BackdateWindowDays = 5 }, NullLogger<CollectPaymentCommandHandler>.Instance);
+
+        var threeDaysAgo = AppTimeZone.Today(DateTime.UtcNow).AddDays(-3);
+        var id = await handler.Handle(new CollectPaymentCommand(
+            customerId, null, null, 50m, nameof(PaymentMethod.Cash), null, null, threeDaysAgo), CancellationToken.None);
+
+        var payment = await db.Payments.FirstAsync(p => p.Id == id);
+        Assert.Equal(threeDaysAgo, AppTimeZone.Today(payment.PaidAt));
+    }
+
+    [Fact]
+    public async Task CollectPayment_OlderThanWindow_Throws()
+    {
+        var (db, ctx) = NewDb();
+        var customerId = Guid.NewGuid();
+        db.Customers.Add(new Customer { Id = customerId, TenantId = TenantA, Name = "Ravi", Mobile = "9" });
+        await db.SaveChangesAsync();
+
+        var handler = new CollectPaymentCommandHandler(
+            db, ctx, new FakeCurrentUser { UserId = Guid.NewGuid(), TenantId = TenantA },
+            new FakeAppSettings { BackdateWindowDays = 5 }, NullLogger<CollectPaymentCommandHandler>.Instance);
+
+        var tenDaysAgo = AppTimeZone.Today(DateTime.UtcNow).AddDays(-10);
+        await Assert.ThrowsAsync<ValidationException>(() => handler.Handle(new CollectPaymentCommand(
+            customerId, null, null, 50m, nameof(PaymentMethod.Cash), null, null, tenDaysAgo), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task CollectPayment_FutureDate_Throws()
+    {
+        var (db, ctx) = NewDb();
+        var customerId = Guid.NewGuid();
+        db.Customers.Add(new Customer { Id = customerId, TenantId = TenantA, Name = "Ravi", Mobile = "9" });
+        await db.SaveChangesAsync();
+
+        var handler = new CollectPaymentCommandHandler(
+            db, ctx, new FakeCurrentUser { UserId = Guid.NewGuid(), TenantId = TenantA },
+            new FakeAppSettings { BackdateWindowDays = 5 }, NullLogger<CollectPaymentCommandHandler>.Instance);
+
+        var tomorrow = AppTimeZone.Today(DateTime.UtcNow).AddDays(1);
+        await Assert.ThrowsAsync<ValidationException>(() => handler.Handle(new CollectPaymentCommand(
+            customerId, null, null, 50m, nameof(PaymentMethod.Cash), null, null, tomorrow), CancellationToken.None));
     }
 
     [Fact]

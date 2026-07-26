@@ -19,6 +19,10 @@ public class PlatformBillingTransactionConfiguration : IEntityTypeConfiguration<
         b.Property(t => t.RazorpayPaymentId).HasMaxLength(100);
 
         b.HasOne(t => t.Tenant).WithMany().HasForeignKey(t => t.TenantId);
+        // Optional link to the paid invoice. SetNull, not Cascade: deleting an invoice must never erase
+        // the money ledger row (which is the audit record of the charge).
+        b.HasOne(t => t.SubscriptionInvoice).WithMany()
+            .HasForeignKey(t => t.SubscriptionInvoiceId).OnDelete(DeleteBehavior.SetNull);
         b.HasIndex(t => t.TenantId);
         b.HasIndex(t => t.Status);
     }

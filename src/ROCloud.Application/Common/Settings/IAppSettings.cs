@@ -47,6 +47,13 @@ public interface IAppSettings
     /// <summary>How long an emailed invoice download link stays valid, in days (Billing:InvoiceLinkExpiryDays). Default 7.</summary>
     int InvoiceLinkExpiryDays { get; }
 
+    /// <summary>
+    /// How many days back a manual order, payment or jar return may be dated (Billing:BackdateWindowDays).
+    /// Enforced server-side and surfaced to the portals so their date pickers grey out older days. 0 = today
+    /// only. Default 5. The always-on "already-invoiced period" reject for orders is separate from this window.
+    /// </summary>
+    int BackdateWindowDays { get; }
+
     /// <summary>Max delivery-proof upload size in bytes (Files:DeliveryProofMaxBytes). Default 5 MB.</summary>
     long DeliveryProofMaxBytes { get; }
 

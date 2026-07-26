@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using ROCloud.Application.Common;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
+using ROCloud.Application.Tests.Auth;
 using ROCloud.Application.Features.Orders.Commands.CancelOrder;
 using ROCloud.Application.Features.Orders.Commands.CreateOrder;
 using ROCloud.Application.Features.Orders.Dtos;
@@ -70,7 +72,7 @@ public class OrderTests
 
         var handler = new CreateOrderCommandHandler(
             db, ctx, new FakeCurrentUser { UserId = Guid.NewGuid(), TenantId = TenantA },
-            NullLogger<CreateOrderCommandHandler>.Instance);
+            new FakeAppSettings(), NullLogger<CreateOrderCommandHandler>.Instance);
 
         var orderId = await handler.Handle(
             new CreateOrderCommand(customerId, null, null, null,
@@ -89,7 +91,7 @@ public class OrderTests
 
         var handler = new CreateOrderCommandHandler(
             db, ctx, new FakeCurrentUser { UserId = Guid.NewGuid(), TenantId = TenantA },
-            NullLogger<CreateOrderCommandHandler>.Instance);
+            new FakeAppSettings(), NullLogger<CreateOrderCommandHandler>.Instance);
 
         var orderId = await handler.Handle(
             new CreateOrderCommand(customerId, null, null, null,
@@ -120,7 +122,7 @@ public class OrderTests
 
         var handler = new CreateOrderCommandHandler(
             db, ctx, new FakeCurrentUser { UserId = Guid.NewGuid(), TenantId = TenantA },
-            NullLogger<CreateOrderCommandHandler>.Instance);
+            new FakeAppSettings(), NullLogger<CreateOrderCommandHandler>.Instance);
 
         var orderId = await handler.Handle(
             new CreateOrderCommand(customerId, null, null, null,
@@ -147,6 +149,78 @@ public class OrderTests
 
         await Assert.ThrowsAsync<ValidationException>(() =>
             handler.Handle(new CancelOrderCommand(order.Id), CancellationToken.None));
+    }
+
+    // -- Backdating (Billing:BackdateWindowDays) -----------------------------------------------
+
+    private CreateOrderCommandHandler NewCreateHandler(AppDbContext db, TenantContext ctx, int window = 5) =>
+        new(db, ctx, new FakeCurrentUser { UserId = Guid.NewGuid(), TenantId = TenantA },
+            new FakeAppSettings { BackdateWindowDays = window }, NullLogger<CreateOrderCommandHandler>.Instance);
+
+    [Fact]
+    public async Task CreateOrder_BackdatedWithinWindow_Succeeds()
+    {
+        var (db, ctx) = NewDb();
+        var (customerId, productId, _, _) = await SeedAsync(db);
+        var threeDaysAgo = AppTimeZone.Today(DateTime.UtcNow).AddDays(-3);
+
+        var orderId = await NewCreateHandler(db, ctx).Handle(
+            new CreateOrderCommand(customerId, threeDaysAgo, null, null,
+                [new CreateOrderItemDto(productId, 1, null)]), CancellationToken.None);
+
+        var order = await db.Orders.FirstAsync(o => o.Id == orderId);
+        Assert.Equal(threeDaysAgo, order.OrderDate);
+        Assert.Equal(threeDaysAgo, order.Delivery!.ScheduledDate);
+    }
+
+    [Fact]
+    public async Task CreateOrder_OlderThanWindow_Throws()
+    {
+        var (db, ctx) = NewDb();
+        var (customerId, productId, _, _) = await SeedAsync(db);
+        var tenDaysAgo = AppTimeZone.Today(DateTime.UtcNow).AddDays(-10);
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            NewCreateHandler(db, ctx).Handle(
+                new CreateOrderCommand(customerId, tenDaysAgo, null, null,
+                    [new CreateOrderItemDto(productId, 1, null)]), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task CreateOrder_FutureDate_IsAllowedAsAdvanceBooking()
+    {
+        var (db, ctx) = NewDb();
+        var (customerId, productId, _, _) = await SeedAsync(db);
+        var nextWeek = AppTimeZone.Today(DateTime.UtcNow).AddDays(7);
+
+        var orderId = await NewCreateHandler(db, ctx).Handle(
+            new CreateOrderCommand(customerId, nextWeek, null, null,
+                [new CreateOrderItemDto(productId, 1, null)]), CancellationToken.None);
+
+        Assert.Equal(nextWeek, (await db.Orders.FirstAsync(o => o.Id == orderId)).OrderDate);
+    }
+
+    [Fact]
+    public async Task CreateOrder_IntoAlreadyInvoicedPeriod_Throws()
+    {
+        var (db, ctx) = NewDb();
+        var (customerId, productId, _, _) = await SeedAsync(db);
+        var twoDaysAgo = AppTimeZone.Today(DateTime.UtcNow).AddDays(-2);
+
+        // An invoice whose period covers the backdated day — the order would slip between closed books.
+        db.Invoices.Add(new Invoice
+        {
+            Id = Guid.NewGuid(), TenantId = TenantA, CustomerId = customerId,
+            InvoiceNumber = "INV-1", InvoiceDate = twoDaysAgo,
+            PeriodFrom = twoDaysAgo.AddDays(-5), PeriodTo = twoDaysAgo.AddDays(5),
+            TotalAmount = 100m, Status = InvoiceStatus.Sent
+        });
+        await db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<ValidationException>(() =>
+            NewCreateHandler(db, ctx).Handle(
+                new CreateOrderCommand(customerId, twoDaysAgo, null, null,
+                    [new CreateOrderItemDto(productId, 1, null)]), CancellationToken.None));
     }
 
     // -- Advance / upcoming bookings + production plan ------------------------------------------

@@ -12,7 +12,10 @@ public sealed record BillingTransactionDto(
     string BillingCycle,
     string Status,
     string? RazorpayPaymentId,
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    /// <summary>The paid invoice (SUB-…), when linked — lets the admin open/download the document.</summary>
+    Guid? InvoiceId = null,
+    string? InvoiceNumber = null);
 
 /// <summary>Billing list plus headline totals.</summary>
 public sealed record BillingPageDto(

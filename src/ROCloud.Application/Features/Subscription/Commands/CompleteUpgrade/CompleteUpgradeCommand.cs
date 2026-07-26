@@ -103,7 +103,8 @@ public class CompleteUpgradeCommandHandler : IRequestHandler<CompleteUpgradeComm
         tenant.SubscriptionEndsAt = termEnd;
 
         // Record the platform billing transaction (feeds the super-admin billing dashboard, guide §26).
-        _db.PlatformBillingTransactions.Add(new Domain.Entities.Platform.PlatformBillingTransaction
+        // Linked to its invoice below, once that invoice exists.
+        var transaction = new Domain.Entities.Platform.PlatformBillingTransaction
         {
             Id = Guid.NewGuid(),
             TenantId = tenant.Id,
@@ -111,7 +112,8 @@ public class CompleteUpgradeCommandHandler : IRequestHandler<CompleteUpgradeComm
             Amount = amount,
             BillingCycle = yearly ? "Yearly" : "Monthly",
             Status = "Paid"
-        });
+        };
+        _db.PlatformBillingTransactions.Add(transaction);
 
         // This paid upgrade/renewal supersedes any open Pending renewal invoice — Void it so the owner
         // isn't asked to pay twice for the now-covered period (plan §5.6).
@@ -130,6 +132,7 @@ public class CompleteUpgradeCommandHandler : IRequestHandler<CompleteUpgradeComm
             periodEnd: DateOnly.FromDateTime(termEnd));
         paidInvoice.RazorpayOrderId = request.OrderId;
         _db.SubscriptionInvoices.Add(paidInvoice);
+        transaction.SubscriptionInvoiceId = paidInvoice.Id;   // link the ledger row to this invoice
 
         // Store the PDF (sets PdfUrl) and email the owner a receipt (best-effort — never blocks the upgrade).
         await _invoiceDelivery.ReceiptAsync(paidInvoice, tenant, ct);

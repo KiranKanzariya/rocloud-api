@@ -1,8 +1,11 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using ROCloud.Application.Common;
 using ROCloud.Application.Common.Interfaces;
+using ROCloud.Application.Tests.Auth;
 using ROCloud.Application.Features.Deliveries.Commands.UpdateDeliveryStatus;
 using ROCloud.Application.Features.Inventory.Commands.AddInventoryMovement;
+using ROCloud.Application.Features.Inventory.Commands.RecordCustomerReturn;
 using ROCloud.Application.Features.Inventory.Commands.ReconcileInventory;
 using ROCloud.Application.Services;
 using ROCloud.Domain.Entities.Tenant;
@@ -159,5 +162,57 @@ public class InventoryTests
         Assert.Equal(20, fixedInv.IssuedStock);
         Assert.Equal(10, fixedInv.ReturnedStock);
         Assert.Equal(0, fixedInv.DamagedStock);
+    }
+
+    // -- Standalone customer return (no delivery), optionally backdated -------------------------
+
+    private static async Task<Guid> SeedCustomerAndProductAsync(AppDbContext db, Guid productId)
+    {
+        var customerId = Guid.NewGuid();
+        db.Products.Add(new Product
+        {
+            Id = productId, TenantId = TenantA, Name = "20L Jar", BottleSize = BottleSize.TwentyL, DefaultRate = 40m
+        });
+        db.Customers.Add(new Customer { Id = customerId, TenantId = TenantA, Name = "Cust", Mobile = "9" });
+        await db.SaveChangesAsync();
+        return customerId;
+    }
+
+    private RecordCustomerReturnCommandHandler NewReturnHandler(AppDbContext db, TenantContext ctx, int window = 5) =>
+        new(db, ctx, new FakeCurrentUser { UserId = Guid.NewGuid(), TenantId = TenantA },
+            new FakeAppSettings { BackdateWindowDays = window });
+
+    [Fact]
+    public async Task RecordCustomerReturn_MovesFloatAndStampsBackdate()
+    {
+        var (db, ctx) = NewDb();
+        var productId = Guid.NewGuid();
+        var customerId = await SeedCustomerAndProductAsync(db, productId);
+        var twoDaysAgo = AppTimeZone.Today(DateTime.UtcNow).AddDays(-2);
+
+        var id = await NewReturnHandler(db, ctx).Handle(
+            new RecordCustomerReturnCommand(customerId, productId, 3, twoDaysAgo, null), CancellationToken.None);
+
+        var inv = await db.Inventories.FirstAsync(i => i.ProductId == productId);
+        Assert.Equal(3, inv.ReturnedStock);
+        Assert.Equal(-3, inv.IssuedStock); // issued float reduced (jars came back from the customer)
+
+        var movement = await db.InventoryMovements.FirstAsync(m => m.Id == id);
+        Assert.Equal(InventoryMovementType.Return, movement.MovementType);
+        Assert.Equal(customerId, movement.CustomerId);
+        Assert.Equal(twoDaysAgo, AppTimeZone.Today(movement.CreatedAt));
+    }
+
+    [Fact]
+    public async Task RecordCustomerReturn_OlderThanWindow_Throws()
+    {
+        var (db, ctx) = NewDb();
+        var productId = Guid.NewGuid();
+        var customerId = await SeedCustomerAndProductAsync(db, productId);
+        var tenDaysAgo = AppTimeZone.Today(DateTime.UtcNow).AddDays(-10);
+
+        await Assert.ThrowsAsync<ROCloud.Application.Common.Exceptions.ValidationException>(() =>
+            NewReturnHandler(db, ctx).Handle(
+                new RecordCustomerReturnCommand(customerId, productId, 3, tenDaysAgo, null), CancellationToken.None));
     }
 }

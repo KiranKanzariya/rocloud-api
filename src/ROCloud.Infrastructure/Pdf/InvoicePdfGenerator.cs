@@ -106,8 +106,15 @@ public class InvoicePdfGenerator : IInvoicePdfGenerator
                 TotalLine(totals, "Subtotal", Money(m.SubTotal));
                 if (m.Discount > 0) TotalLine(totals, "Discount", $"−{Money(m.Discount)}", valueColor: ColTeal);
                 // GST may be turned off for this tenant (§24) — omit the tax rows when there's no tax.
-                if (m.CgstAmount > 0) TotalLine(totals, "CGST", Money(m.CgstAmount));
-                if (m.SgstAmount > 0) TotalLine(totals, "SGST", Money(m.SgstAmount));
+                // Show the effective half-rate next to each line (e.g. "CGST (9%)"), derived from the
+                // amount actually charged over the taxable value — so a historical invoice reflects the
+                // rate ON it, not the tenant's current rate. "0.##" trims cleanly: 9.00 → "9", 2.50 → "2.5".
+                var taxable = m.SubTotal - m.Discount;
+                string TaxLabel(string name, decimal amount) =>
+                    taxable > 0 ? $"{name} ({amount / taxable * 100m:0.##}%)" : name;
+
+                if (m.CgstAmount > 0) TotalLine(totals, TaxLabel("CGST", m.CgstAmount), Money(m.CgstAmount));
+                if (m.SgstAmount > 0) TotalLine(totals, TaxLabel("SGST", m.SgstAmount), Money(m.SgstAmount));
 
                 totals.Item().PaddingTop(4).LineHorizontal(0.75f).LineColor(Colors.Grey.Lighten1);
                 totals.Item().PaddingTop(3);

@@ -42,7 +42,9 @@ public class GetBillingTransactionsQueryHandler : IRequestHandler<GetBillingTran
             .Skip((page - 1) * size).Take(size)
             .Select(t => new BillingTransactionDto(
                 t.Id, t.TenantId, t.Tenant!.Name, t.PlanType, t.Amount, t.BillingCycle,
-                t.Status, t.RazorpayPaymentId, t.CreatedAt))
+                t.Status, t.RazorpayPaymentId, t.CreatedAt,
+                t.SubscriptionInvoiceId,
+                t.SubscriptionInvoice != null ? t.SubscriptionInvoice.InvoiceNumber : null))
             .ToListAsync(ct);
 
         return new BillingPageDto(

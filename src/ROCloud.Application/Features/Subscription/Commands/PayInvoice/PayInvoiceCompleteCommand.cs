@@ -101,6 +101,7 @@ public class PayInvoiceCompleteCommandHandler : IRequestHandler<PayInvoiceComple
             BillingCycle = invoice.BillingCycle,
             Status = SubscriptionInvoiceStatus.Paid,
             RazorpayPaymentId = paymentId,
+            SubscriptionInvoiceId = invoice.Id,   // link the ledger row to the invoice it paid
         });
 
         // Store the PAID PDF (sets PdfUrl) and email the owner a receipt (best-effort).

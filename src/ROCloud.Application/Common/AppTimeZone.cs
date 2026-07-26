@@ -29,6 +29,16 @@ public static class AppTimeZone
     public static DateOnly Today(DateTime utcNow) =>
         DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(utcNow, _current));
 
+    /// <summary>
+    /// The UTC instant at midday (configured zone) of the given calendar day. Used to stamp a
+    /// backdated event (payment/return) so it maps back to exactly that day via <see cref="Today"/>,
+    /// regardless of the storage-UTC/display offset. Midday (not midnight) keeps it on the same day in
+    /// both UTC and the app zone, avoiding any off-by-one at the date boundary.
+    /// </summary>
+    public static DateTime MiddayUtc(DateOnly date) =>
+        TimeZoneInfo.ConvertTimeToUtc(
+            date.ToDateTime(new TimeOnly(12, 0), DateTimeKind.Unspecified), _current);
+
     private static TimeZoneInfo Resolve(string id)
     {
         // .NET 6+ resolves both IANA ("Asia/Kolkata") and Windows ("India Standard Time") ids on every

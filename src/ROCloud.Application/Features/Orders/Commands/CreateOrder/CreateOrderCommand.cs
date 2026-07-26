@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
+using ROCloud.Application.Common.Settings;
 using ROCloud.Application.Features.Orders.Dtos;
 using ROCloud.Domain.Entities.Tenant;
 using ROCloud.Domain.Enums;
@@ -50,15 +51,17 @@ public class CreateOrderCommandHandler : IRequestHandler<CreateOrderCommand, Gui
     private readonly IAppDbContext _db;
     private readonly ITenantContext _tenant;
     private readonly ICurrentUserService _currentUser;
+    private readonly IAppSettings _settings;
     private readonly ILogger<CreateOrderCommandHandler> _logger;
 
     public CreateOrderCommandHandler(
         IAppDbContext db, ITenantContext tenant, ICurrentUserService currentUser,
-        ILogger<CreateOrderCommandHandler> logger)
+        IAppSettings settings, ILogger<CreateOrderCommandHandler> logger)
     {
         _db = db;
         _tenant = tenant;
         _currentUser = currentUser;
+        _settings = settings;
         _logger = logger;
     }
 
@@ -81,6 +84,16 @@ public class CreateOrderCommandHandler : IRequestHandler<CreateOrderCommand, Gui
             });
 
         var orderDate = request.OrderDate ?? AppTimeZone.Today(DateTime.UtcNow);
+
+        // Backdating rules apply only when the caller explicitly supplied a date (an omitted date defaults
+        // to today and is never "backdated"): it must not be older than the configured window and must not
+        // fall in a period that's already been invoiced for this customer (BackdatedOrderGuard). A future
+        // date is allowed — that's an advance booking (allowFuture).
+        if (request.OrderDate is { } suppliedDate)
+        {
+            BackdateGuard.Validate(suppliedDate, _settings.BackdateWindowDays, "orderDate", allowFuture: true);
+            await BackdatedOrderGuard.EnsureNotInBilledPeriodAsync(_db, customer.Id, suppliedDate, ct);
+        }
 
         // An order is always concretely HomeDelivery or PlantPickup. Single-mode customers are fixed;
         // a "Both" customer chooses per order (the request's choice, defaulting to HomeDelivery).
