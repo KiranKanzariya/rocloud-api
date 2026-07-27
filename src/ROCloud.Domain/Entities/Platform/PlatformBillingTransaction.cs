@@ -16,6 +16,12 @@ public class PlatformBillingTransaction : BaseEntity
     public string Status { get; set; } = "Paid";          // Paid | Failed | Refunded | Pending
     public string? RazorpayPaymentId { get; set; }
 
+    /// <summary>How it was paid — Razorpay's method: card | upi | netbanking | wallet.</summary>
+    public string? PaymentMethod { get; set; }
+
+    /// <summary>Display detail for <see cref="PaymentMethod"/>: the UPI id, "Visa •••• 4366", bank, or wallet.</summary>
+    public string? PaymentInstrument { get; set; }
+
     /// <summary>
     /// The subscription invoice this charge paid for (SUB-…). Lets the admin billing detail open the
     /// actual invoice document. Nullable: legacy rows predate the link, and a free (₹0) upgrade may not

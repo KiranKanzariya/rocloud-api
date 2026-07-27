@@ -7,6 +7,7 @@ using ROCloud.Application.Features.Platform.Billing.Commands.RefundTransaction;
 using ROCloud.Application.Features.Platform.Billing.Dtos;
 using ROCloud.Application.Features.Platform.Billing.Queries.GetBillingInvoice;
 using ROCloud.Application.Features.Platform.Billing.Queries.GetBillingInvoicePdf;
+using ROCloud.Application.Features.Platform.Billing.Queries.GetBillingTransactionById;
 using ROCloud.Application.Features.Platform.Billing.Queries.GetBillingTransactions;
 using ROCloud.Application.Features.Subscription.Dtos;
 
@@ -26,6 +27,11 @@ public class PlatformBillingController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] BillingFilterDto filter, CancellationToken ct)
         => Ok(ApiResponse<BillingPageDto>.Ok(await _mediator.Send(new GetBillingTransactionsQuery(filter), ct)));
+
+    /// <summary>One transaction, for the deep-linkable billing detail page. 404 when unknown.</summary>
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> GetById(Guid id, CancellationToken ct)
+        => Ok(ApiResponse<BillingTransactionDto>.Ok(await _mediator.Send(new GetBillingTransactionByIdQuery(id), ct)));
 
     /// <summary>The subscription invoice this transaction paid for, as data. 404 when none is linked.</summary>
     [HttpGet("{id:guid}/invoice")]

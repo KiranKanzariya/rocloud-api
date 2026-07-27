@@ -3,8 +3,15 @@ namespace ROCloud.Application.Common.Interfaces;
 /// <summary>Razorpay order/subscription created via the REST API.</summary>
 public sealed record RazorpayOrder(string OrderId, long AmountPaise, string Currency, string KeyId);
 
-/// <summary>Whether a Razorpay order has been paid, and the captured payment id if so.</summary>
-public sealed record RazorpayPaymentStatus(bool Paid, string? PaymentId);
+/// <summary>
+/// Whether a Razorpay order has been paid, the captured payment id, and how it was paid.
+/// <paramref name="Method"/> is Razorpay's raw method ("card", "upi", "netbanking", "wallet");
+/// <paramref name="Instrument"/> is the display detail for that method — the UPI id, "Visa •••• 4366",
+/// the bank, or the wallet name. Both are null when the payment predates capture or is unknown.
+/// Never contains a full card number: Razorpay only ever exposes the last four digits (§10.18).
+/// </summary>
+public sealed record RazorpayPaymentStatus(
+    bool Paid, string? PaymentId, string? Method = null, string? Instrument = null);
 
 /// <summary>
 /// Razorpay integration (guide §10). Online payments + ROCloud's own subscription billing.

@@ -63,9 +63,13 @@ public class DeliveriesController : ControllerBase
         => Ok(ApiResponse<IReadOnlyList<DeliveryListItemDto>>.Ok(
             await _mediator.Send(new GetMyRouteQuery(filter), ct)));
 
-    /// <summary>What was recorded at a completed stop — for the read-only delivery summary.</summary>
+    /// <summary>
+    /// What was recorded at a completed stop — for the read-only delivery summary. A delivery boy holds
+    /// Deliveries.ViewOwn (not .View), so without this he could never review a stop he had just completed;
+    /// the handler scopes him to his own stops, exactly as my-route does.
+    /// </summary>
     [HttpGet("{id:guid}")]
-    [RequirePermission("Deliveries.View")]
+    [RequireAnyPermission("Deliveries.View", "Deliveries.ViewOwn")]
     public async Task<IActionResult> GetDetail(Guid id, CancellationToken ct)
         => Ok(ApiResponse<DeliveryDetailDto>.Ok(await _mediator.Send(new GetDeliveryDetailQuery(id), ct)));
 

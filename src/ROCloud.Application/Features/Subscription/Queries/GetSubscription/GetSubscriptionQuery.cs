@@ -41,9 +41,18 @@ public class GetSubscriptionQueryHandler : IRequestHandler<GetSubscriptionQuery,
         var net = SubscriptionDiscountCalculator.Net(
             tenant.SubscriptionDiscountType, tenant.SubscriptionDiscountValue, plan.MonthlyPrice);
 
+        // A downgrade parked until period end (see PlanChangeCalculator) — shown so the owner isn't
+        // surprised when their plan changes, and knows it hasn't happened yet.
+        var scheduled = tenant.ScheduledPlanId is { } scheduledId
+            ? await _db.Plans.Where(p => p.Id == scheduledId)
+                .Select(p => new { p.Name, p.PlanType })
+                .FirstOrDefaultAsync(ct)
+            : null;
+
         return new SubscriptionDto(
             plan.Name, plan.PlanType.ToString(), plan.MonthlyPrice,
             tenant.Status.ToString(), tenant.TrialEndsAt, tenant.SubscriptionEndsAt, usage,
-            tenant.SubscriptionDiscountType.ToString(), tenant.SubscriptionDiscountValue, net);
+            tenant.SubscriptionDiscountType.ToString(), tenant.SubscriptionDiscountValue, net,
+            scheduled?.Name, scheduled?.PlanType.ToString());
     }
 }

@@ -88,6 +88,38 @@ public class SubscriptionExpiryJob
         if (toMarkOverdue.Count > 0)
             await db.SaveChangesAsync(ct);
 
+        // 1b. Apply scheduled downgrades whose period has now ended. A cheaper plan is never applied
+        //     when the owner asks for it — they keep what they paid for until the term runs out, and
+        //     this is where it finally lands. Runs before the renewal step so the invoice raised below
+        //     is priced at the plan the tenant actually holds.
+        var downgradesDue = await db.Tenants
+            .Where(t => t.ScheduledPlanId != null
+                        && t.SubscriptionEndsAt != null && t.SubscriptionEndsAt <= now)
+            .ToListAsync(ct);
+
+        var downgraded = 0;
+        foreach (var tenant in downgradesDue)
+        {
+            var target = await db.Plans.FirstOrDefaultAsync(p => p.Id == tenant.ScheduledPlanId, ct);
+            if (target is null || !target.IsActive)
+            {
+                // Plan retired while the downgrade waited — drop the request rather than move the
+                // tenant onto something unusable. They stay where they are and keep being billed for it.
+                _logger.LogWarning(
+                    "SubscriptionExpiry: scheduled plan {PlanId} for tenant {TenantId} is missing or inactive — cancelled",
+                    tenant.ScheduledPlanId, tenant.Id);
+                tenant.ScheduledPlanId = null;
+                continue;
+            }
+
+            tenant.PlanId = target.Id;
+            tenant.ScheduledPlanId = null;
+            downgraded++;
+        }
+
+        if (downgradesDue.Count > 0)
+            await db.SaveChangesAsync(ct);
+
         // 2. Expiry reminders — trial or subscription ending within the next 7 days.
         var expiring = await db.Tenants
             .Where(t => (t.Status == TenantStatus.Trial || t.Status == TenantStatus.Active || t.Status == TenantStatus.Overdue)
@@ -184,11 +216,18 @@ public class SubscriptionExpiryJob
         {
             if (t.Plan is null || tenantsWithOpenInvoice.Contains(t.Id)) continue;
 
+            // Bill the period at the plan the tenant will HOLD for it. A downgrade scheduled for the
+            // end of this term takes effect exactly when the new period starts, so quoting the current
+            // (dearer) plan would invoice them for something they will not have.
+            var billingPlan = t.ScheduledPlanId is { } scheduledId
+                ? await db.Plans.FirstOrDefaultAsync(p => p.Id == scheduledId && p.IsActive, ct) ?? t.Plan
+                : t.Plan;
+
             var yearly = string.Equals(
                 await SubscriptionInvoiceFactory.LatestBillingCycleAsync(db, t.Id, ct),
                 "Yearly", StringComparison.OrdinalIgnoreCase);
             var cycle = yearly ? "Yearly" : "Monthly";
-            var gross = yearly ? t.Plan.YearlyPrice : t.Plan.MonthlyPrice;
+            var gross = yearly ? billingPlan.YearlyPrice : billingPlan.MonthlyPrice;
             var net = SubscriptionDiscountCalculator.Net(t.SubscriptionDiscountType, t.SubscriptionDiscountValue, gross);
             var unit = yearly ? "year" : "month";
 
@@ -198,20 +237,28 @@ public class SubscriptionExpiryJob
                 // (Option A basis) and keep the tenant Active, with a ₹0 Paid invoice for the record.
                 var basis = t.SubscriptionEndsAt is { } end && end > now ? end : now;
                 var freeInvoice = await SubscriptionInvoiceFactory.BuildAsync(
-                    db, t, t.Plan, cycle, DateOnly.FromDateTime(basis), SubscriptionInvoiceStatus.Paid,
-                    $"{t.Plan.Name} plan — 1 {unit} (free renewal)", ct);
+                    db, t, billingPlan, cycle, DateOnly.FromDateTime(basis), SubscriptionInvoiceStatus.Paid,
+                    $"{billingPlan.Name} plan — 1 {unit} (free renewal)", ct);
                 db.SubscriptionInvoices.Add(freeInvoice);   // no email; its PDF renders on demand
                 t.SubscriptionEndsAt = SubscriptionTermCalculator.NextEnd(
                     t.SubscriptionEndsAt, yearly, _overdueGraceDays, now);
                 t.Status = TenantStatus.Active;
+                // Rolling the term forward IS the period boundary, so a pending downgrade lands here —
+                // otherwise the invoice above would quote the cheaper plan the tenant never received.
+                if (t.ScheduledPlanId is not null && billingPlan.Id == t.ScheduledPlanId)
+                {
+                    t.PlanId = billingPlan.Id;
+                    t.ScheduledPlanId = null;
+                    downgraded++;
+                }
                 autoRenewed++;
                 continue;
             }
 
             // Payable → raise a Pending invoice for the owner to pay.
             var invoice = await SubscriptionInvoiceFactory.BuildAsync(
-                db, t, t.Plan, cycle, DateOnly.FromDateTime(t.SubscriptionEndsAt!.Value),
-                SubscriptionInvoiceStatus.Pending, $"{t.Plan.Name} plan — 1 {unit} renewal", ct);
+                db, t, billingPlan, cycle, DateOnly.FromDateTime(t.SubscriptionEndsAt!.Value),
+                SubscriptionInvoiceStatus.Pending, $"{billingPlan.Name} plan — 1 {unit} renewal", ct);
             db.SubscriptionInvoices.Add(invoice);
             await invoiceDelivery.IssueAsync(invoice, t, ct);   // email owner the invoice (best-effort)
             tenantsWithOpenInvoice.Add(t.Id);
@@ -245,7 +292,7 @@ public class SubscriptionExpiryJob
             await db.SaveChangesAsync(ct);
 
         _logger.LogInformation(
-            "SubscriptionExpiry: {Overdue} marked overdue, {Reminders} reminder(s) sent, {Invoices} renewal invoice(s) raised, {AutoRenewed} free tenant(s) auto-renewed, {Suspended} tenant(s) suspended",
-            toMarkOverdue.Count, reminded, invoicesCreated, autoRenewed, toSuspend.Count);
+            "SubscriptionExpiry: {Overdue} marked overdue, {Downgraded} scheduled downgrade(s) applied, {Reminders} reminder(s) sent, {Invoices} renewal invoice(s) raised, {AutoRenewed} free tenant(s) auto-renewed, {Suspended} tenant(s) suspended",
+            toMarkOverdue.Count, downgraded, reminded, invoicesCreated, autoRenewed, toSuspend.Count);
     }
 }

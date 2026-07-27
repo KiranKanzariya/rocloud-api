@@ -15,8 +15,14 @@ public sealed class FakeRazorpayService : IRazorpayService
     public string PublicKeyId => "key_test";
     public string Currency => "INR";
 
+    /// <summary>Receipt passed to the last CreateOrderAsync call — Razorpay caps it at 40 chars.</summary>
+    public string? LastReceipt { get; private set; }
+
     public Task<RazorpayOrder> CreateOrderAsync(long amountPaise, string receipt, CancellationToken ct = default)
-        => Task.FromResult(new RazorpayOrder(CreatedOrderId, amountPaise, "INR", "key_test"));
+    {
+        LastReceipt = receipt;
+        return Task.FromResult(new RazorpayOrder(CreatedOrderId, amountPaise, "INR", "key_test"));
+    }
 
     public Task<RazorpayPaymentStatus> GetOrderPaymentStatusAsync(string orderId, CancellationToken ct = default)
         => Task.FromResult(PaidStatuses.TryGetValue(orderId, out var s) ? s : new RazorpayPaymentStatus(false, null));

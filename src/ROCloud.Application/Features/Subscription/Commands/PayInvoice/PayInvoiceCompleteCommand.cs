@@ -51,6 +51,8 @@ public class PayInvoiceCompleteCommandHandler : IRequestHandler<PayInvoiceComple
         // Verify payment server-side for a paid invoice with live Razorpay. Free (₹0) and the
         // dev/unconfigured path skip this.
         string? paymentId = null;
+        string? paymentMethod = null;
+        string? paymentInstrument = null;
         if (invoice.Amount > 0m && _razorpay.IsConfigured)
         {
             var orderId = request.OrderId ?? invoice.RazorpayOrderId;
@@ -67,6 +69,8 @@ public class PayInvoiceCompleteCommandHandler : IRequestHandler<PayInvoiceComple
                     ["payment"] = ["Payment could not be verified. The invoice was not marked paid."]
                 });
             paymentId = status.PaymentId;
+            paymentMethod = status.Method;
+            paymentInstrument = status.Instrument;
         }
 
         var tenant = await _db.Tenants.IgnoreQueryFilters()
@@ -78,6 +82,8 @@ public class PayInvoiceCompleteCommandHandler : IRequestHandler<PayInvoiceComple
         invoice.PaidAt = DateTime.UtcNow;
         invoice.RazorpayOrderId = request.OrderId ?? invoice.RazorpayOrderId;
         invoice.RazorpayPaymentId = paymentId;
+        invoice.PaymentMethod = paymentMethod;
+        invoice.PaymentInstrument = paymentInstrument;
 
         // Extend by one cycle of USABLE access and reactivate — grace days are billed, locked-out days
         // are handed back (see SubscriptionTermCalculator).
@@ -101,6 +107,8 @@ public class PayInvoiceCompleteCommandHandler : IRequestHandler<PayInvoiceComple
             BillingCycle = invoice.BillingCycle,
             Status = SubscriptionInvoiceStatus.Paid,
             RazorpayPaymentId = paymentId,
+            PaymentMethod = paymentMethod,
+            PaymentInstrument = paymentInstrument,
             SubscriptionInvoiceId = invoice.Id,   // link the ledger row to the invoice it paid
         });
 

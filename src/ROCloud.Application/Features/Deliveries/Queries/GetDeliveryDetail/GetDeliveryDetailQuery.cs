@@ -17,8 +17,13 @@ public sealed record GetDeliveryDetailQuery(Guid Id) : IRequest<DeliveryDetailDt
 public class GetDeliveryDetailQueryHandler : IRequestHandler<GetDeliveryDetailQuery, DeliveryDetailDto>
 {
     private readonly IAppDbContext _db;
+    private readonly ICurrentUserService _currentUser;
 
-    public GetDeliveryDetailQueryHandler(IAppDbContext db) => _db = db;
+    public GetDeliveryDetailQueryHandler(IAppDbContext db, ICurrentUserService currentUser)
+    {
+        _db = db;
+        _currentUser = currentUser;
+    }
 
     public async Task<DeliveryDetailDto> Handle(GetDeliveryDetailQuery request, CancellationToken ct)
     {
@@ -33,6 +38,12 @@ public class GetDeliveryDetailQueryHandler : IRequestHandler<GetDeliveryDetailQu
             .Include(d => d.Items)
             .FirstOrDefaultAsync(d => d.Id == request.Id, ct)
             ?? throw new NotFoundException("Delivery", request.Id);
+
+        // A delivery boy reaches this endpoint with Deliveries.ViewOwn and may only read his own stops;
+        // owners/managers (who can view the whole board) may read any. Mirrors UpdateDeliveryStatus.
+        if (!_currentUser.Permissions.Contains("Deliveries.View")
+            && delivery.DeliveryBoyId != _currentUser.UserId)
+            throw new ForbiddenAccessException();
 
         var orderProductIds = delivery.Order?.OrderItems.Select(i => i.ProductId).ToHashSet() ?? new();
 

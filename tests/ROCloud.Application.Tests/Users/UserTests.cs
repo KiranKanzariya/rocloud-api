@@ -3,6 +3,7 @@ using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
 using ROCloud.Application.Features.Users.Commands.CreateUser;
 using ROCloud.Application.Features.Users.Commands.DeactivateUser;
+using ROCloud.Application.Features.Users.Commands.DeleteUser;
 using ROCloud.Application.Features.Users.Commands.UpdateUser;
 using ROCloud.Domain.Entities.Platform;
 using ROCloud.Domain.Entities.Tenant;
@@ -187,6 +188,89 @@ public class UserTests
 
         await Assert.ThrowsAsync<PlanLimitException>(() => NewCreateHandler(db, ctx).Handle(
             new CreateUserCommand("DB2", "db2@x.com", "9876543210", dbRoleId, null, null), CancellationToken.None));
+    }
+
+    private sealed class FakeCurrentUser : ICurrentUserService
+    {
+        public bool IsAuthenticated => true;
+        public Guid? UserId { get; init; }
+        public Guid? TenantId { get; init; } = TenantA;
+        public string? Jti => null;
+        public DateTime? AccessTokenExpiresAt => null;
+        public IReadOnlyCollection<string> Permissions { get; init; } = ["Users.Manage"];
+    }
+
+    private static DeleteUserCommandHandler NewDeleteHandler(AppDbContext db, Guid actingUserId)
+        => new(db, new FakeCurrentUser { UserId = actingUserId });
+
+    [Fact]
+    public async Task DeleteUser_SoftDeletes_AndDropsAreasAndSession()
+    {
+        var (db, _) = NewDb();
+        var roleId = await SeedTenantAsync(db, maxUsers: 10);
+        var areaId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        db.Areas.Add(new Area { Id = areaId, TenantId = TenantA, Name = "Sector 7" });
+        db.Users.Add(new User
+        {
+            Id = userId, TenantId = TenantA, RoleId = roleId, Name = "Boy", Email = "boy@x.com",
+            IsActive = true, RefreshToken = "hash", RefreshTokenExpiresAt = DateTime.UtcNow.AddDays(7)
+        });
+        db.UserAreas.Add(new UserArea { Id = Guid.NewGuid(), TenantId = TenantA, UserId = userId, AreaId = areaId });
+        await db.SaveChangesAsync();
+
+        await NewDeleteHandler(db, Guid.NewGuid()).Handle(new DeleteUserCommand(userId), CancellationToken.None);
+
+        Assert.Empty(await db.Users.Where(u => u.Id == userId).ToListAsync());   // filtered out of every query
+        var raw = await db.Users.IgnoreQueryFilters().FirstAsync(u => u.Id == userId);
+        Assert.True(raw.IsDeleted);
+        Assert.False(raw.IsActive);
+        Assert.Null(raw.RefreshToken);
+        Assert.Empty(await db.UserAreas.Where(ua => ua.UserId == userId).ToListAsync());
+    }
+
+    [Fact]
+    public async Task DeleteUser_Self_ReturnsValidationError()
+    {
+        var (db, _) = NewDb();
+        var roleId = await SeedTenantAsync(db, maxUsers: 10);
+        var me = Guid.NewGuid();
+        db.Users.Add(new User { Id = me, TenantId = TenantA, RoleId = roleId, Name = "Me", Email = "me@x.com", IsActive = true });
+        await db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<ValidationException>(() => NewDeleteHandler(db, me)
+            .Handle(new DeleteUserCommand(me), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task DeleteUser_LastActiveOwner_ReturnsValidationError()
+    {
+        var (db, _) = NewDb();
+        var (ownerRoleId, _) = await SeedOwnerRolesAsync(db);
+        var ownerId = Guid.NewGuid();
+        db.Users.Add(new User { Id = ownerId, TenantId = TenantA, RoleId = ownerRoleId, Name = "Owner", Email = "owner@x.com", IsActive = true });
+        await db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<ValidationException>(() => NewDeleteHandler(db, Guid.NewGuid())
+            .Handle(new DeleteUserCommand(ownerId), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task DeleteUser_WithOpenDeliveries_ReturnsValidationError()
+    {
+        var (db, _) = NewDb();
+        var roleId = await SeedTenantAsync(db, maxUsers: 10);
+        var boyId = Guid.NewGuid();
+        db.Users.Add(new User { Id = boyId, TenantId = TenantA, RoleId = roleId, Name = "Boy", Email = "boy@x.com", IsActive = true });
+        db.Deliveries.Add(new Delivery
+        {
+            Id = Guid.NewGuid(), TenantId = TenantA, OrderId = Guid.NewGuid(), DeliveryBoyId = boyId,
+            ScheduledDate = new DateOnly(2026, 7, 27), Status = DeliveryStatus.Pending
+        });
+        await db.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<ValidationException>(() => NewDeleteHandler(db, Guid.NewGuid())
+            .Handle(new DeleteUserCommand(boyId), CancellationToken.None));
     }
 
     [Fact]

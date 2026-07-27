@@ -26,9 +26,20 @@ public class GetSubscriptionInvoiceByIdQueryHandler : IRequestHandler<GetSubscri
             .FirstOrDefaultAsync(x => x.Id == request.Id && x.TenantId == _tenant.TenantId, ct)
             ?? throw new NotFoundException("SubscriptionInvoice", request.Id);
 
+        // Bill-to comes from the tenant record, not a snapshot on the invoice: the owner's own
+        // business details are what they expect to see, current as of viewing.
+        var t = await _db.Tenants.IgnoreQueryFilters()
+            .Where(x => x.Id == i.TenantId)
+            .Select(x => new SubscriptionBillToDto(
+                x.Name, x.GstNumber, x.AddressLine, x.City, x.State, x.Pincode,
+                x.OwnerEmail, x.OwnerMobile))
+            .FirstOrDefaultAsync(ct);
+
         return new SubscriptionInvoiceDto(
             i.Id, i.InvoiceNumber, i.PlanType, i.BillingCycle,
             i.PeriodStart, i.PeriodEnd, i.GrossAmount, i.DiscountAmount, i.Amount,
-            i.Status, i.DueDate, i.Description, i.PaidAt);
+            i.Status, i.DueDate, i.Description, i.PaidAt,
+            i.RazorpayOrderId, i.RazorpayPaymentId, t,
+            i.PaymentMethod, i.PaymentInstrument);
     }
 }

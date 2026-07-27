@@ -182,6 +182,38 @@ public class DeliveryTests
     }
 
     [Fact]
+    public async Task GetDeliveryDetail_DeliveryBoy_CanReadOwnStop()
+    {
+        var (db, _) = NewDb();
+        var me = Guid.NewGuid();
+        var (_, delivery) = await SeedOrderWithDeliveryAsync(db, deliveryBoyId: me, status: DeliveryStatus.Delivered);
+
+        var handler = new Application.Features.Deliveries.Queries.GetDeliveryDetail.GetDeliveryDetailQueryHandler(
+            db, new FakeCurrentUser { UserId = me, TenantId = TenantA, Permissions = DeliveryBoyPerms });
+
+        var detail = await handler.Handle(
+            new Application.Features.Deliveries.Queries.GetDeliveryDetail.GetDeliveryDetailQuery(delivery.Id),
+            CancellationToken.None);
+
+        Assert.Equal(delivery.Id, detail.Id);
+    }
+
+    [Fact]
+    public async Task GetDeliveryDetail_DeliveryBoy_CannotReadAnotherBoysStop()
+    {
+        var (db, _) = NewDb();
+        var (_, delivery) = await SeedOrderWithDeliveryAsync(
+            db, deliveryBoyId: Guid.NewGuid(), status: DeliveryStatus.Delivered);   // someone else's stop
+
+        var handler = new Application.Features.Deliveries.Queries.GetDeliveryDetail.GetDeliveryDetailQueryHandler(
+            db, new FakeCurrentUser { UserId = Guid.NewGuid(), TenantId = TenantA, Permissions = DeliveryBoyPerms });
+
+        await Assert.ThrowsAsync<ForbiddenAccessException>(() => handler.Handle(
+            new Application.Features.Deliveries.Queries.GetDeliveryDetail.GetDeliveryDetailQuery(delivery.Id),
+            CancellationToken.None));
+    }
+
+    [Fact]
     public async Task GetMyRoute_AsDeliveryBoy_ReturnsOnlyOwnDeliveries()
     {
         var (db, _) = NewDb();
@@ -298,7 +330,8 @@ public class DeliveryTests
         });
         await db.SaveChangesAsync();
 
-        var handler = new Application.Features.Deliveries.Queries.GetDeliveryDetail.GetDeliveryDetailQueryHandler(db);
+        var handler = new Application.Features.Deliveries.Queries.GetDeliveryDetail.GetDeliveryDetailQueryHandler(
+            db, new FakeCurrentUser { UserId = Guid.NewGuid(), TenantId = TenantA, Permissions = CanViewAll });
         var detail = await handler.Handle(
             new Application.Features.Deliveries.Queries.GetDeliveryDetail.GetDeliveryDetailQuery(delivery.Id),
             CancellationToken.None);

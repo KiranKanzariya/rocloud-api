@@ -34,6 +34,12 @@ public class SubscriptionInvoice : BaseEntity
 
     public string? RazorpayOrderId { get; set; }
     public string? RazorpayPaymentId { get; set; }
+
+    /// <summary>How it was paid — Razorpay's method: card | upi | netbanking | wallet.</summary>
+    public string? PaymentMethod { get; set; }
+
+    /// <summary>Display detail for <see cref="PaymentMethod"/>: the UPI id, "Visa •••• 4366", bank, or wallet.</summary>
+    public string? PaymentInstrument { get; set; }
     public DateTime? PaidAt { get; set; }
 
     // Navigation

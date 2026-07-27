@@ -19,9 +19,10 @@ public class InitiateSubscriptionTests
     }
 
     private static async Task SeedAsync(AppDbContext db, Guid tenantId,
-        SubscriptionDiscountType discType = SubscriptionDiscountType.None, decimal discVal = 0m)
+        SubscriptionDiscountType discType = SubscriptionDiscountType.None, decimal discVal = 0m,
+        PlanType planType = PlanType.Pro)
     {
-        var plan = new Plan { Id = Guid.NewGuid(), Name = "Pro", PlanType = PlanType.Pro, MonthlyPrice = 999m, YearlyPrice = 9990m, IsActive = true };
+        var plan = new Plan { Id = Guid.NewGuid(), Name = planType.ToString(), PlanType = planType, MonthlyPrice = 999m, YearlyPrice = 9990m, IsActive = true };
         db.Plans.Add(plan);
         db.Tenants.Add(new Tenant
         {
@@ -61,6 +62,27 @@ public class InitiateSubscriptionTests
 
         Assert.True(dto.DevMode);
         Assert.Null(dto.OrderId);
+    }
+
+    /// <summary>
+    /// Razorpay 400s an order whose receipt is over 40 characters. "sub-{tenantId:N}-{planName}" was 42
+    /// for Basic and 47 for Enterprise, so upgrading to either tier always failed at the gateway.
+    /// </summary>
+    [Theory]
+    [InlineData(PlanType.Basic)]
+    [InlineData(PlanType.Pro)]
+    [InlineData(PlanType.Enterprise)]
+    public async Task PaidUpgrade_ReceiptStaysWithinRazorpayLimit(PlanType planType)
+    {
+        var (db, ctx) = NewDb();
+        await SeedAsync(db, ctx.TenantId, planType: planType);
+        var rp = new FakeRazorpayService { Configured = true };
+
+        await Handler(db, ctx, rp).Handle(
+            new InitiateSubscriptionCommand(planType.ToString(), "Monthly"), CancellationToken.None);
+
+        Assert.NotNull(rp.LastReceipt);
+        Assert.True(rp.LastReceipt!.Length <= 40, $"receipt '{rp.LastReceipt}' is {rp.LastReceipt.Length} chars");
     }
 
     [Fact]

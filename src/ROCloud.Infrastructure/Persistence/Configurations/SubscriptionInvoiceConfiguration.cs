@@ -18,6 +18,8 @@ public class SubscriptionInvoiceConfiguration : IEntityTypeConfiguration<Subscri
         b.Property(t => t.Description).HasMaxLength(200);
         b.Property(t => t.RazorpayOrderId).HasMaxLength(100);
         b.Property(t => t.RazorpayPaymentId).HasMaxLength(100);
+        b.Property(t => t.PaymentMethod).HasMaxLength(20);
+        b.Property(t => t.PaymentInstrument).HasMaxLength(100);
         b.Property(t => t.GrossAmount).HasPrecision(10, 2);
         b.Property(t => t.DiscountAmount).HasPrecision(10, 2);
         b.Property(t => t.Amount).HasPrecision(10, 2);

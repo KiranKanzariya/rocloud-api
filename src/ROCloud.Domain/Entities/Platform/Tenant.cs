@@ -8,6 +8,15 @@ namespace ROCloud.Domain.Entities.Platform;
 public class Tenant : BaseEntity
 {
     public Guid PlanId { get; set; }
+
+    /// <summary>
+    /// A downgrade the owner asked for, taking effect at <see cref="SubscriptionEndsAt"/>. A cheaper
+    /// plan is never applied immediately — the tenant keeps what they already paid for until the period
+    /// ends (and is never refunded). Null when no change is pending. Cleared if they change their mind
+    /// or upgrade again. DB: tenants.scheduled_plan_id.
+    /// </summary>
+    public Guid? ScheduledPlanId { get; set; }
+
     public string Name { get; set; } = string.Empty;
     public string Subdomain { get; set; } = string.Empty;
     public string OwnerName { get; set; } = string.Empty;

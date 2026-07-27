@@ -47,6 +47,9 @@ public class RazorpayService : IRazorpayService
     private int SubscriptionTotalCount =>
         int.TryParse(_config["Razorpay:SubscriptionTotalCount"], out var n) ? n : 12;
 
+    /// <summary>Razorpay rejects an order whose receipt exceeds this many characters.</summary>
+    private const int MaxReceiptLength = 40;
+
     public async Task<RazorpayOrder> CreateOrderAsync(long amountPaise, string receipt, CancellationToken ct = default)
     {
         if (!IsConfigured)
@@ -54,6 +57,17 @@ public class RazorpayService : IRazorpayService
             {
                 ["razorpay"] = ["Online payments are not configured (missing Razorpay credentials)."]
             });
+
+        // The receipt is a free-text reference shown in the Razorpay dashboard — worth truncating rather
+        // than failing the whole payment, since an over-long one 400s the order with a message the caller
+        // can do nothing about. Callers should stay inside the limit; this is the backstop.
+        if (receipt.Length > MaxReceiptLength)
+        {
+            _logger.LogWarning(
+                "Razorpay receipt '{Receipt}' is {Length} chars — truncating to {Max}.",
+                receipt, receipt.Length, MaxReceiptLength);
+            receipt = receipt[..MaxReceiptLength];
+        }
 
         using var req = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}orders")
         {
@@ -106,8 +120,10 @@ public class RazorpayService : IRazorpayService
         if (!string.Equals(status, "paid", StringComparison.OrdinalIgnoreCase))
             return new RazorpayPaymentStatus(false, null);
 
-        // 2. Find the captured payment id for this order.
+        // 2. Find the captured payment for this order — its id, and how it was paid.
         string? capturedId = null;
+        string? method = null;
+        string? instrument = null;
         using var payResp = await SendAuthedGetAsync($"{BaseUrl}orders/{orderId}/payments", ct);
         if (payResp.IsSuccessStatusCode)
         {
@@ -119,12 +135,54 @@ public class RazorpayService : IRazorpayService
                     if (string.Equals(st, "captured", StringComparison.OrdinalIgnoreCase))
                     {
                         capturedId = item.GetProperty("id").GetString();
+                        method = item.TryGetProperty("method", out var m) ? m.GetString() : null;
+                        instrument = DescribeInstrument(item, method);
                         break;
                     }
                 }
         }
 
-        return new RazorpayPaymentStatus(true, capturedId);
+        return new RazorpayPaymentStatus(true, capturedId, method, instrument);
+    }
+
+    /// <summary>
+    /// Renders the payment's instrument for display: the UPI id, "Visa •••• 4366", the bank, or the
+    /// wallet. Composed here so both billing screens describe a charge identically, and so the DB never
+    /// holds anything beyond what Razorpay already exposes (last four digits at most — §10.18).
+    /// Returns null when the payload doesn't carry the expected detail, which the UI renders as bare method.
+    /// </summary>
+    private static string? DescribeInstrument(JsonElement payment, string? method)
+    {
+        static string? Str(JsonElement el, string prop) =>
+            el.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String
+                ? v.GetString() is { Length: > 0 } s ? s : null
+                : null;
+
+        switch (method?.ToLowerInvariant())
+        {
+            case "card":
+                if (!payment.TryGetProperty("card", out var card) || card.ValueKind != JsonValueKind.Object)
+                    return null;
+                var last4 = Str(card, "last4");
+                var network = Str(card, "network");
+                if (last4 is null) return network;
+                return network is null ? $"•••• {last4}" : $"{network} •••• {last4}";
+
+            case "upi":
+                // Razorpay puts the payer's VPA at the top level; newer payloads also nest it under `upi`.
+                return Str(payment, "vpa")
+                       ?? (payment.TryGetProperty("upi", out var upi) && upi.ValueKind == JsonValueKind.Object
+                           ? Str(upi, "vpa") : null);
+
+            case "netbanking":
+                return Str(payment, "bank");
+
+            case "wallet":
+                return Str(payment, "wallet");
+
+            default:
+                return null;
+        }
     }
 
     private async Task<HttpResponseMessage> SendAuthedGetAsync(string url, CancellationToken ct)

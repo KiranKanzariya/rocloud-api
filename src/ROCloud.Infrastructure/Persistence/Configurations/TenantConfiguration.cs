@@ -32,5 +32,9 @@ public class TenantConfiguration : IEntityTypeConfiguration<Tenant>
         b.Property(t => t.DefaultLanguage).HasMaxLength(5);
         b.Property(t => t.SubscriptionDiscountType).HasConversion<string>().HasMaxLength(20);
         b.Property(t => t.SubscriptionDiscountValue).HasPrecision(10, 2);
+
+        // Pending downgrade. No navigation property: it is read as an id and resolved explicitly by the
+        // renewal job, so a plan row can never be dragged into an unrelated tenant query.
+        b.Property(t => t.ScheduledPlanId).HasColumnName("scheduled_plan_id");
     }
 }

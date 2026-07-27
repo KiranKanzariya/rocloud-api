@@ -15,7 +15,12 @@ public sealed record BillingTransactionDto(
     DateTime CreatedAt,
     /// <summary>The paid invoice (SUB-…), when linked — lets the admin open/download the document.</summary>
     Guid? InvoiceId = null,
-    string? InvoiceNumber = null);
+    string? InvoiceNumber = null,
+    /// <summary>How it was paid: card | upi | netbanking | wallet. Null for charges taken before
+    /// this was captured, or settled outside Razorpay.</summary>
+    string? PaymentMethod = null,
+    /// <summary>Display detail for the method — UPI id, "Visa •••• 4366", bank, or wallet.</summary>
+    string? PaymentInstrument = null);
 
 /// <summary>Billing list plus headline totals.</summary>
 public sealed record BillingPageDto(

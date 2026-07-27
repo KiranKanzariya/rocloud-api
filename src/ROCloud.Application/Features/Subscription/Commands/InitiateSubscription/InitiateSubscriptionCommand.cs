@@ -56,18 +56,31 @@ public class InitiateSubscriptionCommandHandler
         // No usable live credentials → dev mode (client simulates the payment, then upgrade-complete).
         var devMode = !_razorpay.IsConfigured;
 
-        var gross = string.Equals(request.BillingCycle, "Yearly", StringComparison.OrdinalIgnoreCase)
-            ? plan.YearlyPrice
-            : plan.MonthlyPrice;
+        var yearly = string.Equals(request.BillingCycle, "Yearly", StringComparison.OrdinalIgnoreCase);
+        var gross = yearly ? plan.YearlyPrice : plan.MonthlyPrice;
 
         // Apply the tenant's standing subscription discount (guide §26).
         var discount = SubscriptionDiscountCalculator.Discount(
             tenant.SubscriptionDiscountType, tenant.SubscriptionDiscountValue, gross);
-        var amount = gross - discount;
+        var fullCycleNet = gross - discount;
 
-        // A 100% discount (or free months) nets to ₹0. Razorpay rejects zero-amount orders, so flag
-        // this as free — the client skips the gateway and completes the upgrade directly.
-        var isFree = amount <= 0m;
+        // What this change really is. Mid-cycle it is prorated over the days left, so the order we
+        // create must be for THAT amount — the client opens Checkout with whatever we return here, and
+        // CompleteUpgrade re-derives the same figure, so the two must agree.
+        var currentPlan = await _db.Plans.FirstOrDefaultAsync(p => p.Id == tenant.PlanId, ct);
+        var oldNet = currentPlan is null ? 0m : SubscriptionDiscountCalculator.Net(
+            tenant.SubscriptionDiscountType, tenant.SubscriptionDiscountValue,
+            yearly ? currentPlan.YearlyPrice : currentPlan.MonthlyPrice);
+
+        var change = PlanChangeCalculator.Decide(
+            tenant.SubscriptionEndsAt, oldNet, fullCycleNet, yearly, DateTime.UtcNow);
+        var amount = change.Amount;
+
+        // ₹0 to pay — a 100% discount, a downgrade (never charged), or a prorated delta that rounds to
+        // nothing. Razorpay rejects zero-amount orders, so the client skips the gateway and completes
+        // directly. Sub-₹1 lands here too: Razorpay's minimum order is ₹1.00, and refusing to apply a
+        // legitimate plan change over 40 paise would be absurd.
+        var isFree = amount < PlanChangeCalculator.MinChargeableAmount;
 
         // Paid upgrade with live keys → create a real Razorpay order the client must pay before
         // upgrade-complete (which verifies it server-side). One-time order, not a recurring
@@ -76,7 +89,11 @@ public class InitiateSubscriptionCommandHandler
         if (!isFree && !devMode)
         {
             var amountPaise = (long)Math.Round(amount * 100m, MidpointRounding.AwayFromZero);
-            var order = await _razorpay.CreateOrderAsync(amountPaise, $"sub-{tenant.Id:N}-{planType}", ct);
+            // Razorpay caps `receipt` at 40 characters. "sub-" + the 32-char tenant id + "-" + the plan
+            // NAME came to 42 for Basic and 47 for Enterprise, so every upgrade to those two tiers was
+            // rejected with a 400 (only Pro, at exactly 40, fit). The tier's initial keeps it at 38.
+            var receipt = $"sub-{tenant.Id:N}-{planType.ToString()[0]}";
+            var order = await _razorpay.CreateOrderAsync(amountPaise, receipt, ct);
             orderId = order.OrderId;
         }
 
@@ -89,6 +106,10 @@ public class InitiateSubscriptionCommandHandler
             DevMode: devMode,
             GrossAmount: gross,
             DiscountAmount: discount,
-            IsFree: isFree);
+            IsFree: isFree,
+            ChangeKind: change.Kind.ToString(),
+            RemainingDays: change.RemainingDays,
+            FullCycleAmount: fullCycleNet,
+            EffectiveAt: change.Kind == PlanChangeKind.Downgrade ? tenant.SubscriptionEndsAt : null);
     }
 }

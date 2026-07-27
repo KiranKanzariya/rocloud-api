@@ -44,7 +44,8 @@ public class GetBillingTransactionsQueryHandler : IRequestHandler<GetBillingTran
                 t.Id, t.TenantId, t.Tenant!.Name, t.PlanType, t.Amount, t.BillingCycle,
                 t.Status, t.RazorpayPaymentId, t.CreatedAt,
                 t.SubscriptionInvoiceId,
-                t.SubscriptionInvoice != null ? t.SubscriptionInvoice.InvoiceNumber : null))
+                t.SubscriptionInvoice != null ? t.SubscriptionInvoice.InvoiceNumber : null,
+                t.PaymentMethod, t.PaymentInstrument))
             .ToListAsync(ct);
 
         return new BillingPageDto(

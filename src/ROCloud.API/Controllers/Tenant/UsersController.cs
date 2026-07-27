@@ -5,6 +5,7 @@ using ROCloud.API.Filters;
 using ROCloud.Application.Common.Models;
 using ROCloud.Application.Features.Users.Commands.CreateUser;
 using ROCloud.Application.Features.Users.Commands.DeactivateUser;
+using ROCloud.Application.Features.Users.Commands.DeleteUser;
 using ROCloud.Application.Features.Users.Commands.InviteUser;
 using ROCloud.Application.Features.Users.Commands.ResetUserPassword;
 using ROCloud.Application.Features.Users.Commands.UpdateUser;
@@ -47,6 +48,15 @@ public class UsersController : ControllerBase
     {
         await _mediator.Send(new UpdateUserCommand(
             id, body.Name, body.Mobile, body.RoleId, body.IsActive, body.AreaIds), ct);
+        return Ok(ApiResponse<object>.Ok(new { id }));
+    }
+
+    /// <summary>Soft-deletes a team member. Deactivate is the reversible alternative.</summary>
+    [HttpDelete("{id:guid}")]
+    [RequirePermission("Users.Manage")]
+    public async Task<IActionResult> DeleteUser(Guid id, CancellationToken ct)
+    {
+        await _mediator.Send(new DeleteUserCommand(id), ct);
         return Ok(ApiResponse<object>.Ok(new { id }));
     }
 
