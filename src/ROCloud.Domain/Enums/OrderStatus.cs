@@ -8,5 +8,8 @@ public enum OrderStatus
     InTransit,
     Delivered,
     Cancelled,
-    Returned
+    Returned,
+    /// <summary>The delivery was attempted and failed — the order was not delivered. Set when its
+    /// delivery is marked Failed, so the order stops reading "InTransit" everywhere it's shown.</summary>
+    Failed
 }

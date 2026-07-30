@@ -7,6 +7,7 @@ using ROCloud.Application.Features.Deliveries.Commands.UpdateDeliveryStatus;
 using ROCloud.Application.Features.Deliveries.Dtos;
 using ROCloud.Application.Features.Deliveries.Queries.GetDeliveryBoard;
 using ROCloud.Application.Features.Deliveries.Queries.GetMyRoute;
+using ROCloud.Application.Features.Customers;
 using ROCloud.Application.Services;
 using ROCloud.Domain.Entities.Tenant;
 using ROCloud.Domain.Enums;
@@ -95,6 +96,191 @@ public class DeliveryTests
 
         var updatedOrder = await db.Orders.FirstAsync(o => o.Id == order.Id);
         Assert.Equal(OrderStatus.Delivered, updatedOrder.Status);
+    }
+
+    [Fact]
+    public async Task UpdateDeliveryStatus_OnFailed_MarksTheOrderFailed_NotLeftInTransit()
+    {
+        var (db, ctx) = NewDb();
+        var (order, delivery) = await SeedOrderWithDeliveryAsync(db, status: DeliveryStatus.InTransit);
+        order.Status = OrderStatus.InTransit;   // dispatched
+        await db.SaveChangesAsync();
+
+        var currentUser = new FakeCurrentUser { UserId = Guid.NewGuid(), TenantId = TenantA, Permissions = CanViewAll };
+        await new UpdateDeliveryStatusCommandHandler(
+            db, ctx, currentUser, new InventoryService(db, ctx, currentUser),
+            NullLogger<UpdateDeliveryStatusCommandHandler>.Instance).Handle(
+            new UpdateDeliveryStatusCommand(delivery.Id, nameof(DeliveryStatus.Failed),
+                null, null, null, null, null, null, null, "not home"), CancellationToken.None);
+
+        var updatedOrder = await db.Orders.FirstAsync(o => o.Id == order.Id);
+        Assert.Equal(OrderStatus.Failed, updatedOrder.Status);   // was left InTransit before
+        var updatedDelivery = await db.Deliveries.FirstAsync(d => d.Id == delivery.Id);
+        Assert.Equal(DeliveryStatus.Failed, updatedDelivery.Status);
+    }
+
+    [Fact]
+    public async Task UpdateDeliveryStatus_RedeliveringAnAlreadyDeliveredStop_DoesNotDoubleCount()
+    {
+        var (db, ctx) = NewDb();
+        var (order, delivery) = await SeedOrderWithDeliveryAsync(db);
+
+        // A product line so the delivery records an Issue movement (the jars-delivered source).
+        var productId = Guid.NewGuid();
+        db.Products.Add(new Product
+        {
+            Id = productId, TenantId = TenantA, Name = "20L Jar", BottleSize = BottleSize.TwentyL, DefaultRate = 40m
+        });
+        db.OrderItems.Add(new OrderItem
+        {
+            Id = Guid.NewGuid(), TenantId = TenantA, OrderId = order.Id, ProductId = productId,
+            Quantity = 2, UnitRate = 40m
+        });
+        await db.SaveChangesAsync();
+
+        var currentUser = new FakeCurrentUser { UserId = Guid.NewGuid(), TenantId = TenantA, Permissions = CanViewAll };
+        UpdateDeliveryStatusCommandHandler NewHandler() => new(
+            db, ctx, currentUser, new InventoryService(db, ctx, currentUser),
+            NullLogger<UpdateDeliveryStatusCommandHandler>.Instance);
+        UpdateDeliveryStatusCommand Deliver() => new(
+            delivery.Id, nameof(DeliveryStatus.Delivered),
+            JarsDelivered: 2, JarsReturned: 0, CollectedAmount: 80m, PaymentMethod: nameof(PaymentMethod.Cash),
+            ProofImageUrl: null, Latitude: null, Longitude: null, Notes: null);
+
+        await NewHandler().Handle(Deliver(), CancellationToken.None);
+        await NewHandler().Handle(Deliver(), CancellationToken.None);   // retry / double-tap
+
+        // The second submit is an idempotent no-op — only ONE set of effects, so jars aren't inflated.
+        var issued = await db.InventoryMovements
+            .Where(m => m.CustomerId == order.CustomerId && m.MovementType == InventoryMovementType.Issue)
+            .SumAsync(m => m.Quantity);
+        Assert.Equal(2, issued);   // not 4
+
+        Assert.Equal(1, await db.Payments.CountAsync(p => p.OrderId == order.Id));   // not 2
+    }
+
+    [Fact]
+    public async Task UpdateDeliveryStatus_DeliveringFewerThanOrdered_BillsWhatWasDelivered()
+    {
+        // Ordered 2, but the customer took only 1 at the door (single-count path). The line's Quantity —
+        // which every ledger/invoice read bills off — must follow the delivered jars, while the plan is
+        // preserved in OrderedQuantity.
+        var (db, ctx) = NewDb();
+        var (order, delivery) = await SeedOrderWithDeliveryAsync(db);
+        var productId = Guid.NewGuid();
+        db.Products.Add(new Product
+        {
+            Id = productId, TenantId = TenantA, Name = "20L Jar", BottleSize = BottleSize.TwentyL, DefaultRate = 40m
+        });
+        db.OrderItems.Add(new OrderItem
+        {
+            Id = Guid.NewGuid(), TenantId = TenantA, OrderId = order.Id, ProductId = productId,
+            Quantity = 2, OrderedQuantity = 2, UnitRate = 40m
+        });
+        await db.SaveChangesAsync();
+
+        var currentUser = new FakeCurrentUser { UserId = Guid.NewGuid(), TenantId = TenantA, Permissions = CanViewAll };
+        await new UpdateDeliveryStatusCommandHandler(
+            db, ctx, currentUser, new InventoryService(db, ctx, currentUser),
+            NullLogger<UpdateDeliveryStatusCommandHandler>.Instance).Handle(
+            new UpdateDeliveryStatusCommand(delivery.Id, nameof(DeliveryStatus.Delivered),
+                JarsDelivered: 1, JarsReturned: 0, CollectedAmount: 0m, PaymentMethod: null,
+                ProofImageUrl: null, Latitude: null, Longitude: null, Notes: null), CancellationToken.None);
+
+        var item = await db.OrderItems.FirstAsync(i => i.OrderId == order.Id);
+        Assert.Equal(1, item.Quantity);          // billed = delivered
+        Assert.Equal(2, item.OrderedQuantity);   // original plan preserved
+
+        // Ledger charges for the 1 jar handed over (₹40), not the ordered 2 (₹80).
+        var balance = await CustomerBalance.ComputeAsync(db, order.CustomerId, CancellationToken.None);
+        Assert.Equal(40m, balance);
+    }
+
+    [Fact]
+    public async Task UpdateDeliveryStatus_DeliveringMoreThanOrdered_BillsWhatWasDelivered()
+    {
+        // Ordered 2, but the customer wanted 3 (per-item path). The extra jar must be billed — the line's
+        // Quantity follows the jars actually handed over, even above what was ordered.
+        var (db, ctx) = NewDb();
+        var (order, delivery) = await SeedOrderWithDeliveryAsync(db);
+        var productId = Guid.NewGuid();
+        db.Products.Add(new Product
+        {
+            Id = productId, TenantId = TenantA, Name = "20L Jar", BottleSize = BottleSize.TwentyL, DefaultRate = 40m
+        });
+        var orderItemId = Guid.NewGuid();
+        db.OrderItems.Add(new OrderItem
+        {
+            Id = orderItemId, TenantId = TenantA, OrderId = order.Id, ProductId = productId,
+            Quantity = 2, OrderedQuantity = 2, UnitRate = 40m
+        });
+        await db.SaveChangesAsync();
+
+        var currentUser = new FakeCurrentUser { UserId = Guid.NewGuid(), TenantId = TenantA, Permissions = CanViewAll };
+        await new UpdateDeliveryStatusCommandHandler(
+            db, ctx, currentUser, new InventoryService(db, ctx, currentUser),
+            NullLogger<UpdateDeliveryStatusCommandHandler>.Instance).Handle(
+            new UpdateDeliveryStatusCommand(delivery.Id, nameof(DeliveryStatus.Delivered),
+                JarsDelivered: null, JarsReturned: null, CollectedAmount: 0m, PaymentMethod: null,
+                ProofImageUrl: null, Latitude: null, Longitude: null, Notes: null,
+                Items: new[] { new DeliveryItemInputDto(orderItemId, JarsDelivered: 3, JarsReturned: 0) }),
+            CancellationToken.None);
+
+        var item = await db.OrderItems.FirstAsync(i => i.OrderId == order.Id);
+        Assert.Equal(3, item.Quantity);          // billed = delivered (above the ordered 2)
+        Assert.Equal(2, item.OrderedQuantity);
+
+        var balance = await CustomerBalance.ComputeAsync(db, order.CustomerId, CancellationToken.None);
+        Assert.Equal(120m, balance);             // 3 × ₹40
+    }
+
+    [Fact]
+    public async Task UpdateDeliveryStatus_OtherDelivery_AddsOffOrderProductAsBilledLine()
+    {
+        // Ordered a 20L; customer refused it (delivered 0) and took an 18L instead. The 18L isn't on the
+        // order, so it must be added as a new billed line + Issue movement — while the 20L bills nothing.
+        var (db, ctx) = NewDb();
+        var (order, delivery) = await SeedOrderWithDeliveryAsync(db);
+
+        var p20 = Guid.NewGuid();
+        var p18 = Guid.NewGuid();
+        db.Products.Add(new Product { Id = p20, TenantId = TenantA, Name = "20L Jar", BottleSize = BottleSize.TwentyL, DefaultRate = 40m });
+        db.Products.Add(new Product { Id = p18, TenantId = TenantA, Name = "18L Jar", BottleSize = BottleSize.EighteenL, DefaultRate = 35m });
+        var orderItemId = Guid.NewGuid();
+        db.OrderItems.Add(new OrderItem
+        {
+            Id = orderItemId, TenantId = TenantA, OrderId = order.Id, ProductId = p20,
+            Quantity = 1, OrderedQuantity = 1, UnitRate = 40m
+        });
+        await db.SaveChangesAsync();
+
+        var currentUser = new FakeCurrentUser { UserId = Guid.NewGuid(), TenantId = TenantA, Permissions = CanViewAll };
+        await new UpdateDeliveryStatusCommandHandler(
+            db, ctx, currentUser, new InventoryService(db, ctx, currentUser),
+            NullLogger<UpdateDeliveryStatusCommandHandler>.Instance).Handle(
+            new UpdateDeliveryStatusCommand(delivery.Id, nameof(DeliveryStatus.Delivered),
+                JarsDelivered: null, JarsReturned: null, CollectedAmount: 0m, PaymentMethod: null,
+                ProofImageUrl: null, Latitude: null, Longitude: null, Notes: null,
+                Items: new[] { new DeliveryItemInputDto(orderItemId, JarsDelivered: 0, JarsReturned: 0) },
+                OtherDeliveries: new[] { new OtherDeliveryInputDto(p18, Quantity: 1, UnitRate: null) }),
+            CancellationToken.None);
+
+        // The 20L line now bills nothing (delivered 0); a new 18L line was added at its default rate.
+        var items = await db.OrderItems.Where(i => i.OrderId == order.Id).ToListAsync();
+        Assert.Equal(2, items.Count);
+        Assert.Equal(0, items.Single(i => i.ProductId == p20).Quantity);
+        var eighteen = items.Single(i => i.ProductId == p18);
+        Assert.Equal(1, eighteen.Quantity);
+        Assert.Equal(0, eighteen.OrderedQuantity);   // never ordered → "added at delivery"
+        Assert.Equal(35m, eighteen.UnitRate);        // product default rate (no explicit rate supplied)
+
+        // Ledger charges only the 18L actually handed over (₹35), not the refused 20L.
+        var balance = await CustomerBalance.ComputeAsync(db, order.CustomerId, CancellationToken.None);
+        Assert.Equal(35m, balance);
+
+        // Inventory issued the 18L.
+        Assert.True(await db.InventoryMovements.AnyAsync(
+            m => m.ProductId == p18 && m.MovementType == InventoryMovementType.Issue && m.Quantity == 1));
     }
 
     [Fact]

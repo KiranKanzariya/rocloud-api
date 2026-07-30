@@ -58,6 +58,33 @@ public class CustomerTests
     }
 
     [Fact]
+    public async Task GetCustomers_SortByBalance_OrdersByTheSignedLedger()
+    {
+        var (db, _) = NewDb();
+        var owed = Guid.NewGuid();     // +100 owed
+        var advance = Guid.NewGuid();  // −30 advance (paid more than billed)
+        var zero = Guid.NewGuid();     //   0
+        db.Customers.Add(new Customer { Id = owed, TenantId = TenantA, Name = "Owed", Mobile = "1", IsActive = true });
+        db.Customers.Add(new Customer { Id = advance, TenantId = TenantA, Name = "Advance", Mobile = "2", IsActive = true });
+        db.Customers.Add(new Customer { Id = zero, TenantId = TenantA, Name = "Zero", Mobile = "3", IsActive = true });
+
+        db.Invoices.Add(new Invoice { Id = Guid.NewGuid(), TenantId = TenantA, CustomerId = owed, TotalAmount = 100m, Status = InvoiceStatus.Sent });
+        db.Invoices.Add(new Invoice { Id = Guid.NewGuid(), TenantId = TenantA, CustomerId = advance, TotalAmount = 50m, Status = InvoiceStatus.Sent });
+        db.Payments.Add(new Payment { Id = Guid.NewGuid(), TenantId = TenantA, CustomerId = advance, Amount = 80m, Status = PaymentStatus.Completed });
+        await db.SaveChangesAsync();
+
+        var handler = new GetCustomersQueryHandler(db);
+
+        var asc = await handler.Handle(
+            new GetCustomersQuery(new CustomerFilterDto { SortBy = "balance", SortDir = "asc" }), CancellationToken.None);
+        Assert.Equal(new[] { "Advance", "Zero", "Owed" }, asc.Items.Select(c => c.Name));   // −30, 0, +100
+
+        var desc = await handler.Handle(
+            new GetCustomersQuery(new CustomerFilterDto { SortBy = "balance", SortDir = "desc" }), CancellationToken.None);
+        Assert.Equal(new[] { "Owed", "Zero", "Advance" }, desc.Items.Select(c => c.Name));
+    }
+
+    [Fact]
     public async Task GetCustomers_WithFilter_ReturnsFilteredResults()
     {
         var (db, _) = NewDb();

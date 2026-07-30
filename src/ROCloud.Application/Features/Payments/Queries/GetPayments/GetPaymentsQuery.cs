@@ -1,5 +1,6 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using ROCloud.Application.Common;
 using ROCloud.Application.Common.Interfaces;
 using ROCloud.Application.Common.Models;
 using ROCloud.Application.Features.Payments.Dtos;
@@ -36,15 +37,17 @@ public class GetPaymentsQueryHandler : IRequestHandler<GetPaymentsQuery, PagedRe
             var status = Enum.Parse<PaymentStatus>(f.Status);
             query = query.Where(p => p.Status == status);
         }
+        // IST-day boundaries (PaidAt is stored UTC): match GetPaymentSummary so the list and the money
+        // tiles above it cover the exact same window.
         if (f.FromDate is { } from)
         {
-            var fromTs = from.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
-            query = query.Where(p => p.PaidAt >= fromTs);
+            var lower = AppTimeZone.StartOfDayUtc(from);
+            query = query.Where(p => p.PaidAt >= lower);
         }
         if (f.ToDate is { } to)
         {
-            var toTs = to.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc);
-            query = query.Where(p => p.PaidAt <= toTs);
+            var upperExclusive = AppTimeZone.StartOfDayUtc(to.AddDays(1));
+            query = query.Where(p => p.PaidAt < upperExclusive);
         }
 
         var total = await query.CountAsync(ct);

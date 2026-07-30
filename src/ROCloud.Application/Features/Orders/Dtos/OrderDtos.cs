@@ -55,7 +55,7 @@ public sealed record OrderDto(
     OrderDeliveryDto? Delivery);
 
 public sealed record OrderItemDto(
-    Guid Id, Guid ProductId, string ProductName, int Quantity, decimal UnitRate, decimal TotalAmount);
+    Guid Id, Guid ProductId, string ProductName, int Quantity, int OrderedQuantity, decimal UnitRate, decimal TotalAmount);
 
 /// <summary>The 1:1 delivery summary shown inside an order.</summary>
 public sealed record OrderDeliveryDto(

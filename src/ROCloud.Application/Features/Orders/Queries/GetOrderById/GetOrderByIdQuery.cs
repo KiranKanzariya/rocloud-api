@@ -54,7 +54,7 @@ public class GetOrderByIdQueryHandler : IRequestHandler<GetOrderByIdQuery, Order
             .Select(i => new OrderItemDto(
                 i.Id, i.ProductId,
                 i.Product?.Name ?? string.Empty,
-                i.Quantity, i.UnitRate, i.Quantity * i.UnitRate))
+                i.Quantity, i.OrderedQuantity, i.UnitRate, i.Quantity * i.UnitRate))
             .ToList();
 
         // Per-product out/back for the delivery. A delivery item can reference a product NOT on the

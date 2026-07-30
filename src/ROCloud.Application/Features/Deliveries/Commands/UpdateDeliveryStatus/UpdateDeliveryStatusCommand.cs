@@ -29,7 +29,10 @@ public sealed record UpdateDeliveryStatusCommand(
     string? Notes,
     IReadOnlyList<DeliveryItemInputDto>? Items = null,
     // Empties returned for products NOT on this order (e.g. a 20L returned during an 18L delivery).
-    IReadOnlyList<OtherReturnInputDto>? OtherReturns = null) : IRequest;
+    IReadOnlyList<OtherReturnInputDto>? OtherReturns = null,
+    // Products handed over that were NOT on this order (e.g. an 18L given when the ordered 20L was
+    // refused). Each becomes a new order line so it is billed and inventoried like any other item.
+    IReadOnlyList<OtherDeliveryInputDto>? OtherDeliveries = null) : IRequest;
 
 public class UpdateDeliveryStatusCommandValidator : AbstractValidator<UpdateDeliveryStatusCommand>
 {
@@ -51,6 +54,12 @@ public class UpdateDeliveryStatusCommandValidator : AbstractValidator<UpdateDeli
             i.RuleFor(x => x.ProductId).NotEmpty();
             i.RuleFor(x => x.Quantity).GreaterThan(0);
         }).When(c => c.OtherReturns is not null);
+        RuleForEach(c => c.OtherDeliveries).ChildRules(i =>
+        {
+            i.RuleFor(x => x.ProductId).NotEmpty();
+            i.RuleFor(x => x.Quantity).GreaterThan(0);
+            i.RuleFor(x => x.UnitRate).GreaterThanOrEqualTo(0).When(x => x.UnitRate.HasValue);
+        }).When(c => c.OtherDeliveries is not null);
         RuleFor(c => c.CollectedAmount).GreaterThanOrEqualTo(0).When(c => c.CollectedAmount.HasValue);
         RuleFor(c => c.PaymentMethod)
             .Must(v => v is null || Enum.GetNames<PaymentMethod>().Contains(v))
@@ -103,6 +112,7 @@ public class UpdateDeliveryStatusCommandHandler : IRequestHandler<UpdateDelivery
             });
 
         var status = Enum.Parse<DeliveryStatus>(request.Status);
+        var alreadyDelivered = delivery.Status == DeliveryStatus.Delivered;
 
         // Plant-pickup orders have no delivery boy / route — the customer collects from the plant,
         // so there is no "in transit" leg. Such stops go straight Pending → Delivered.
@@ -123,11 +133,21 @@ public class UpdateDeliveryStatusCommandHandler : IRequestHandler<UpdateDelivery
                 break;
 
             case DeliveryStatus.Delivered:
-                await ApplyDeliveredAsync(delivery, request, ct);
+                // Idempotent: a retried or double-tapped submit (the delivery boy's phone re-sends a
+                // timed-out request) must NOT create a second set of Issue movements + DeliveryItems +
+                // doorstep payment — that double-counts the customer's jars delivered. Apply the effects
+                // only on the FIRST transition into Delivered; a repeat is a no-op success. (The UI
+                // already renders a Delivered stop read-only, so there is no legitimate re-submit.)
+                if (!alreadyDelivered)
+                    await ApplyDeliveredAsync(delivery, request, ct);
                 break;
 
             case DeliveryStatus.Failed:
-                // Order stays in its current state; the stop is simply marked failed.
+                // Mirror the outcome onto the order so it doesn't keep reading "InTransit" on the order
+                // list / board / filters. Failed ≠ Delivered, so it stays out of every dues/invoice
+                // calculation (those all key off Delivered) — a failed drop owes nothing, correctly.
+                if (delivery.Order is { } failedOrder)
+                    failedOrder.Status = OrderStatus.Failed;
                 break;
 
             case DeliveryStatus.Skipped:
@@ -202,27 +222,96 @@ public class UpdateDeliveryStatusCommandHandler : IRequestHandler<UpdateDelivery
         if (request.OtherReturns is { Count: > 0 })
             foreach (var r in request.OtherReturns)
                 await _inventory.RecordReturnAsync(r.ProductId, r.Quantity, delivery.OrderId, customerId, ct);
+
+        // Products handed over that weren't on the order (e.g. an 18L given when the ordered 20L was
+        // refused). Each is added to the order as a new line so it is billed and inventoried like any
+        // other item — the mirror of OtherReturns for deliveries.
+        if (request.OtherDeliveries is { Count: > 0 })
+            await ApplyOtherDeliveriesAsync(delivery, request.OtherDeliveries, customerId, ct);
+    }
+
+    private async Task ApplyOtherDeliveriesAsync(
+        Delivery delivery, IReadOnlyList<OtherDeliveryInputDto> extras, Guid? customerId, CancellationToken ct)
+    {
+        var productIds = extras.Select(e => e.ProductId).Distinct().ToList();
+        var rates = await _db.Products
+            .Where(p => productIds.Contains(p.Id))
+            .Select(p => new { p.Id, p.DefaultRate })
+            .ToDictionaryAsync(p => p.Id, p => p.DefaultRate, ct);
+
+        var missing = productIds.Where(id => !rates.ContainsKey(id)).ToList();
+        if (missing.Count > 0)
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["otherDeliveries"] = ["An off-order delivered product does not exist."]
+            });
+
+        var extraDelivered = 0;
+        foreach (var extra in extras)
+        {
+            // A brand-new order line for the substituted/added product. ordered_quantity = 0 marks it as
+            // "added at delivery" (never ordered); quantity = jars handed over drives the bill. total_amount
+            // is the stored generated column, so the charge derives itself — every billing read just works.
+            var orderItem = new OrderItem
+            {
+                Id = Guid.NewGuid(),
+                TenantId = _tenant.TenantId,
+                OrderId = delivery.OrderId,
+                ProductId = extra.ProductId,
+                Quantity = extra.Quantity,
+                OrderedQuantity = 0,
+                UnitRate = extra.UnitRate ?? rates[extra.ProductId]
+            };
+            _db.OrderItems.Add(orderItem);
+
+            await _inventory.RecordIssueAsync(extra.ProductId, extra.Quantity, delivery.OrderId, customerId, ct);
+
+            _db.DeliveryItems.Add(new DeliveryItem
+            {
+                Id = Guid.NewGuid(),
+                TenantId = _tenant.TenantId,
+                DeliveryId = delivery.Id,
+                OrderItemId = orderItem.Id,
+                ProductId = extra.ProductId,
+                JarsDelivered = extra.Quantity,
+                JarsReturned = 0
+            });
+
+            extraDelivered += extra.Quantity;
+        }
+
+        // Keep the header jars-delivered total inclusive of the off-order items (set by the per-item /
+        // single-count path just above).
+        delivery.JarsDelivered = (delivery.JarsDelivered ?? 0) + extraDelivered;
     }
 
     private async Task ApplyPerItemAsync(
         Delivery delivery, IReadOnlyList<DeliveryItemInputDto> items, Guid? customerId, CancellationToken ct)
     {
-        // Resolve each input to a real order item of THIS order (and its product).
+        // Tracked (not projected) so each line's Quantity can be rewritten to the jars actually
+        // delivered — see below. Resolves each input to a real order item of THIS order.
         var orderItems = await _db.OrderItems
             .Where(i => i.OrderId == delivery.OrderId)
-            .Select(i => new { i.Id, i.ProductId })
-            .ToDictionaryAsync(i => i.Id, i => i.ProductId, ct);
+            .ToDictionaryAsync(i => i.Id, ct);
 
         var totalDelivered = 0;
         var totalReturned = 0;
 
         foreach (var item in items)
         {
-            if (!orderItems.TryGetValue(item.OrderItemId, out var productId))
+            if (!orderItems.TryGetValue(item.OrderItemId, out var orderItem))
                 throw new ValidationException(new Dictionary<string, string[]>
                 {
                     ["items"] = ["A delivery line does not belong to this order."]
                 });
+
+            var productId = orderItem.ProductId;
+
+            // Bill what was delivered: a line's charge is quantity * unit_rate, and every ledger / invoice
+            // read sums Quantity — so setting Quantity to the jars actually handed over makes the customer
+            // pay for exactly what they received, whether that's more or fewer than ordered. OrderedQuantity
+            // still holds the plan. A line the boy leaves out of `items` keeps its ordered quantity.
+            orderItem.Quantity = item.JarsDelivered;
 
             if (item.JarsDelivered > 0)
                 await _inventory.RecordIssueAsync(productId, item.JarsDelivered, delivery.OrderId, customerId, ct);
@@ -255,23 +344,31 @@ public class UpdateDeliveryStatusCommandHandler : IRequestHandler<UpdateDelivery
         delivery.JarsDelivered = request.JarsDelivered ?? 0;
         delivery.JarsReturned = request.JarsReturned ?? 0;
 
-        var productId = await _db.OrderItems
+        // Tracked so the primary line's Quantity can be rewritten to what was delivered (below).
+        var orderItems = await _db.OrderItems
             .Where(i => i.OrderId == delivery.OrderId)
             .OrderBy(i => i.Id)
-            .Select(i => (Guid?)i.ProductId)
-            .FirstOrDefaultAsync(ct);
+            .ToListAsync(ct);
 
-        if (productId is { } pid)
-        {
-            if (delivery.JarsDelivered is { } delivered && delivered > 0)
-                await _inventory.RecordIssueAsync(pid, delivered, delivery.OrderId, customerId, ct);
-            if (delivery.JarsReturned is { } returned && returned > 0)
-                await _inventory.RecordReturnAsync(pid, returned, delivery.OrderId, customerId, ct);
-        }
-        else
+        var primary = orderItems.FirstOrDefault();
+        if (primary is null)
         {
             _logger.LogWarning(
                 "Delivery {DeliveryId} has no order items; skipping inventory update.", delivery.Id);
+            return;
         }
+
+        // Bill what was delivered (single-count path): a single-item order's charge follows the delivered
+        // jar count. Only when a count is explicitly supplied — a caller that marks delivered without a jar
+        // count keeps the ordered quantity (old behaviour). A multi-item order reached via this legacy path
+        // has an ambiguous split, so its quantities are left untouched (the per-item path carries the breakdown).
+        if (orderItems.Count == 1 && request.JarsDelivered is { } billed)
+            primary.Quantity = billed;
+
+        var pid = primary.ProductId;
+        if (delivery.JarsDelivered is { } delivered && delivered > 0)
+            await _inventory.RecordIssueAsync(pid, delivered, delivery.OrderId, customerId, ct);
+        if (delivery.JarsReturned is { } returned && returned > 0)
+            await _inventory.RecordReturnAsync(pid, returned, delivery.OrderId, customerId, ct);
     }
 }

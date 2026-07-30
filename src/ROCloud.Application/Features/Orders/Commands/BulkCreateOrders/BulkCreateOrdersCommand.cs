@@ -112,6 +112,7 @@ public class BulkCreateOrdersCommandHandler : IRequestHandler<BulkCreateOrdersCo
                 OrderId = order.Id,
                 ProductId = sub.ProductId,
                 Quantity = sub.Quantity,
+                OrderedQuantity = sub.Quantity, // snapshot the plan; Quantity is rewritten to delivered jars at delivery
                 UnitRate = sub.RatePerUnit
             });
             order.Delivery = new Delivery

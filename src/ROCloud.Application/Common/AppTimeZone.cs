@@ -30,6 +30,15 @@ public static class AppTimeZone
         DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(utcNow, _current));
 
     /// <summary>
+    /// The UTC instant at the START (00:00) of the given calendar day in the configured zone. Filter a
+    /// UTC-timestamp column by a business (IST) date range as <c>col &gt;= StartOfDayUtc(from)</c> and
+    /// <c>col &lt; StartOfDayUtc(to.AddDays(1))</c>, so "today" means the IST day — not the UTC day,
+    /// which would attribute the first 5½ h of every IST morning to the day before.
+    /// </summary>
+    public static DateTime StartOfDayUtc(DateOnly date) =>
+        TimeZoneInfo.ConvertTimeToUtc(date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified), _current);
+
+    /// <summary>
     /// The UTC instant at midday (configured zone) of the given calendar day. Used to stamp a
     /// backdated event (payment/return) so it maps back to exactly that day via <see cref="Today"/>,
     /// regardless of the storage-UTC/display offset. Midday (not midnight) keeps it on the same day in

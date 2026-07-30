@@ -109,6 +109,7 @@ public class UpdateOrderCommandHandler : IRequestHandler<UpdateOrderCommand>
             {
                 matched.Add(line.Id);
                 line.Quantity = item.Quantity;
+                line.OrderedQuantity = item.Quantity; // editable only pre-delivery, so ordered tracks the edit
                 if (item.UnitRate is { } explicitRate)
                     line.UnitRate = explicitRate;   // else keep the original (frozen) rate
             }
@@ -124,6 +125,7 @@ public class UpdateOrderCommandHandler : IRequestHandler<UpdateOrderCommand>
                     OrderId = order.Id,
                     ProductId = item.ProductId,
                     Quantity = item.Quantity,
+                    OrderedQuantity = item.Quantity,
                     UnitRate = item.UnitRate ?? products[item.ProductId].DefaultRate
                 });
             }

@@ -116,6 +116,13 @@ public sealed record DeliveryItemInputDto(Guid OrderItemId, int JarsDelivered, i
 /// </summary>
 public sealed record OtherReturnInputDto(Guid ProductId, int Quantity);
 
+/// <summary>
+/// A product handed over that is NOT on the order (e.g. an 18L given when the ordered 20L was refused).
+/// Added to the order as a new line at delivery (ordered_quantity = 0) so it is billed and inventoried
+/// like any other item. UnitRate is optional — the product's default rate is used when omitted.
+/// </summary>
+public sealed record OtherDeliveryInputDto(Guid ProductId, int Quantity, decimal? UnitRate = null);
+
 /// <summary>Payload for a delivery boy updating a stop's status from the mobile route.</summary>
 public sealed record UpdateDeliveryStatusDto(
     string Status,
@@ -128,4 +135,5 @@ public sealed record UpdateDeliveryStatusDto(
     decimal? Longitude,
     string? Notes,
     IReadOnlyList<DeliveryItemInputDto>? Items = null,
-    IReadOnlyList<OtherReturnInputDto>? OtherReturns = null);
+    IReadOnlyList<OtherReturnInputDto>? OtherReturns = null,
+    IReadOnlyList<OtherDeliveryInputDto>? OtherDeliveries = null);

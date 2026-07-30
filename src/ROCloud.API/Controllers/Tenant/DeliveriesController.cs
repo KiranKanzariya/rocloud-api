@@ -81,7 +81,7 @@ public class DeliveriesController : ControllerBase
         await _mediator.Send(new UpdateDeliveryStatusCommand(
             id, body.Status, body.JarsDelivered, body.JarsReturned, body.CollectedAmount,
             body.PaymentMethod, body.ProofImageUrl, body.Latitude, body.Longitude, body.Notes,
-            body.Items, body.OtherReturns), ct);
+            body.Items, body.OtherReturns, body.OtherDeliveries), ct);
         return Ok(ApiResponse<object>.Ok(new { id }));
     }
 

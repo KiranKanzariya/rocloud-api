@@ -134,6 +134,7 @@ public class CreateOrderCommandHandler : IRequestHandler<CreateOrderCommand, Gui
                 OrderId = order.Id,
                 ProductId = item.ProductId,
                 Quantity = item.Quantity,
+                OrderedQuantity = item.Quantity, // snapshot the plan; Quantity is rewritten to delivered jars at delivery
                 UnitRate = rate
                 // TotalAmount is a stored generated column (quantity * unit_rate) — never set here.
             });

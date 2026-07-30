@@ -1,5 +1,6 @@
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using ROCloud.Application.Common;
 using ROCloud.Application.Common.Interfaces;
 using ROCloud.Application.Features.Payments.Dtos;
 using ROCloud.Domain.Enums;
@@ -30,16 +31,18 @@ public class GetPaymentSummaryQueryHandler : IRequestHandler<GetPaymentSummaryQu
     {
         var query = _db.Payments.Where(p => p.Status == PaymentStatus.Completed);
 
-        // Same window semantics as GetPaymentsQuery, so the tiles agree with the table beneath them.
+        // Window boundaries are the IST day, not the UTC day: PaidAt is stored UTC, but "today" for the
+        // owner is IST — a payment taken at 03:00 IST must count for that IST day, not the previous UTC
+        // one. Same semantics as GetPaymentsQuery, so the tiles agree with the table beneath them.
         if (request.FromDate is { } from)
         {
-            var fromTs = from.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
-            query = query.Where(p => p.PaidAt >= fromTs);
+            var lower = AppTimeZone.StartOfDayUtc(from);
+            query = query.Where(p => p.PaidAt >= lower);
         }
         if (request.ToDate is { } to)
         {
-            var toTs = to.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc);
-            query = query.Where(p => p.PaidAt <= toTs);
+            var upperExclusive = AppTimeZone.StartOfDayUtc(to.AddDays(1));   // whole IST day of `to`
+            query = query.Where(p => p.PaidAt < upperExclusive);
         }
 
         var byMethod = await query

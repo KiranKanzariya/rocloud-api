@@ -30,6 +30,28 @@ public class GetCustomersQueryHandler : IRequestHandler<GetCustomersQuery, Paged
                     || m.MovementType == InventoryMovementType.Damage))
             .Sum(m => (int?)(m.MovementType == InventoryMovementType.Issue ? m.Quantity : -m.Quantity)) ?? 0;
 
+    /// <summary>
+    /// Signed customer ledger (billed − paid) as a translatable order-by key — the SAME formula the
+    /// row projection uses for the displayed Balance, so sorting matches what the column shows. Positive
+    /// = owed, negative = advance/credit. Kept in one place would be nicer, but EF needs it as an
+    /// Expression here and as inline subqueries in the Select; the two must stay in step.
+    /// </summary>
+    private Expression<Func<Customer, decimal>> BalanceExpr => c =>
+        (_db.Invoices
+            .Where(i => i.CustomerId == c.Id && i.Status != InvoiceStatus.Cancelled)
+            .Sum(i => (decimal?)i.TotalAmount) ?? 0m)
+        + (_db.OrderItems
+            .Where(oi => oi.Order!.CustomerId == c.Id
+                && oi.Order.Status == OrderStatus.Delivered
+                && !_db.Invoices.Any(inv => inv.CustomerId == c.Id
+                    && inv.Status != InvoiceStatus.Cancelled
+                    && inv.PeriodFrom != null && inv.PeriodTo != null
+                    && oi.Order.OrderDate >= inv.PeriodFrom && oi.Order.OrderDate <= inv.PeriodTo))
+            .Sum(oi => (decimal?)(oi.Quantity * oi.UnitRate)) ?? 0m)
+        - (_db.Payments
+            .Where(p => p.CustomerId == c.Id && p.Status == PaymentStatus.Completed)
+            .Sum(p => (decimal?)p.Amount) ?? 0m);
+
     public async Task<PagedResult<CustomerListItemDto>> Handle(GetCustomersQuery request, CancellationToken ct)
     {
         var f = request.Filter;
@@ -64,6 +86,7 @@ public class GetCustomersQueryHandler : IRequestHandler<GetCustomersQuery, Paged
             "mobile" => descending ? query.OrderByDescending(c => c.Mobile) : query.OrderBy(c => c.Mobile),
             "code" => descending ? query.OrderByDescending(c => c.CustomerCode) : query.OrderBy(c => c.CustomerCode),
             "jarsout" => descending ? query.OrderByDescending(JarsOutExpr) : query.OrderBy(JarsOutExpr),
+            "balance" => descending ? query.OrderByDescending(BalanceExpr) : query.OrderBy(BalanceExpr),
             // No (or unknown) sortBy → newest first, unconditionally. This branch used to consult
             // `descending` with the ternary INVERTED relative to every branch above, so asking for
             // sortDir=desc without a sortBy returned the OLDEST customers first. A direction without a

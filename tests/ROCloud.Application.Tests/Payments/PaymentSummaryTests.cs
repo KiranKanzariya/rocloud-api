@@ -87,6 +87,26 @@ public class PaymentSummaryTests
     }
 
     [Fact]
+    public async Task CountsAPaymentByItsISTDay_NotItsUTCDay()
+    {
+        var (db, _) = NewDb();
+        // 02:00 IST on `Day` is 20:30 UTC on the PREVIOUS calendar day. The old UTC-boundary window
+        // ([Day 00:00 UTC, Day 23:59 UTC]) dropped it; it must count for `Day`, the owner's IST day.
+        db.Payments.Add(new Payment
+        {
+            Id = Guid.NewGuid(), TenantId = TenantA, CustomerId = Guid.NewGuid(),
+            Amount = 300m, PaymentMethod = PaymentMethod.Cash, Status = PaymentStatus.Completed,
+            PaidAt = new DateTime(2026, 7, 9, 20, 30, 0, DateTimeKind.Utc)   // = 2026-07-10 02:00 IST
+        });
+        await db.SaveChangesAsync();
+
+        var result = await new GetPaymentSummaryQueryHandler(db)
+            .Handle(new GetPaymentSummaryQuery(Day, Day), CancellationToken.None);
+
+        Assert.Equal(300m, result.Collected);   // was ₹0 under UTC-day boundaries
+    }
+
+    [Fact]
     public async Task RespectsTheDateWindow()
     {
         var (db, _) = NewDb();
