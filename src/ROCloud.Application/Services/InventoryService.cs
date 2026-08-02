@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using ROCloud.Application.Common;
 using ROCloud.Application.Common.Interfaces;
 using ROCloud.Domain.Entities.Tenant;
 using ROCloud.Domain.Enums;
@@ -23,21 +24,23 @@ public class InventoryService : IInventoryService
     }
 
     public async Task RecordIssueAsync(
-        Guid productId, int quantity, Guid? orderId, Guid? customerId, CancellationToken ct = default)
+        Guid productId, int quantity, Guid? orderId, Guid? customerId,
+        DateOnly? occurredOn = null, CancellationToken ct = default)
     {
         if (quantity <= 0) return;
         var inv = await GetOrCreateAsync(productId, ct);
         InventoryMath.Apply(inv, InventoryMovementType.Issue, quantity);
-        AddMovement(productId, InventoryMovementType.Issue, quantity, orderId, customerId, null);
+        AddMovement(productId, InventoryMovementType.Issue, quantity, orderId, customerId, null, occurredOn);
     }
 
     public async Task RecordReturnAsync(
-        Guid productId, int quantity, Guid? orderId, Guid? customerId, CancellationToken ct = default)
+        Guid productId, int quantity, Guid? orderId, Guid? customerId,
+        DateOnly? occurredOn = null, CancellationToken ct = default)
     {
         if (quantity <= 0) return;
         var inv = await GetOrCreateAsync(productId, ct);
         InventoryMath.Apply(inv, InventoryMovementType.Return, quantity);
-        AddMovement(productId, InventoryMovementType.Return, quantity, orderId, customerId, null);
+        AddMovement(productId, InventoryMovementType.Return, quantity, orderId, customerId, null, occurredOn);
     }
 
     public async Task RecordDamageAsync(Guid productId, int quantity, string? notes, CancellationToken ct = default)
@@ -72,7 +75,8 @@ public class InventoryService : IInventoryService
     }
 
     private void AddMovement(
-        Guid productId, InventoryMovementType type, int quantity, Guid? orderId, Guid? customerId, string? notes)
+        Guid productId, InventoryMovementType type, int quantity, Guid? orderId, Guid? customerId,
+        string? notes, DateOnly? occurredOn = null)
         => _db.InventoryMovements.Add(new InventoryMovement
         {
             Id = Guid.NewGuid(),
@@ -83,6 +87,11 @@ public class InventoryService : IInventoryService
             MovementType = type,
             Quantity = quantity,
             PerformedBy = _currentUser.UserId,
-            Notes = notes
+            Notes = notes,
+            // Stamp the movement on the day it actually happened (midday, app zone) when the caller says
+            // so — a late/backdated delivery must count in ITS month, not the month it was entered. Same
+            // convention as a backdated customer return. AppDbContext only auto-sets CreatedAt when it is
+            // left at default, so null → now.
+            CreatedAt = occurredOn is { } on ? AppTimeZone.MiddayUtc(on) : default
         });
 }

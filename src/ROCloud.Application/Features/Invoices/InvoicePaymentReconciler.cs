@@ -35,7 +35,10 @@ public static class InvoicePaymentReconciler
             p.InvoiceId = invoice.Id;
 
         invoice.PaidAmount = Math.Min(priorPayments.Sum(p => p.Amount), invoice.TotalAmount);
-        invoice.Status = invoice.PaidAmount >= invoice.TotalAmount && invoice.TotalAmount > 0m
+        // Nothing left to collect → Paid, including a zero-total invoice (100% discount): it is settled
+        // on arrival and no payment will ever move it off Draft. Matches InvoiceAllocationSync, which
+        // recomputes this same status afterwards.
+        invoice.Status = invoice.PaidAmount >= invoice.TotalAmount
             ? InvoiceStatus.Paid
             : invoice.PaidAmount > 0m ? InvoiceStatus.PartiallyPaid : InvoiceStatus.Draft;
     }

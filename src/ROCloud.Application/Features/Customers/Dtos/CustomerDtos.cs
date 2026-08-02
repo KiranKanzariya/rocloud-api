@@ -56,15 +56,21 @@ public sealed record CustomerOrderSummaryDto(Guid Id, DateOnly OrderDate, string
 public sealed record CustomerPaymentSummaryDto(
     Guid Id, decimal Amount, string PaymentMethod, DateTime PaidAt, string? Notes = null);
 
+/// <param name="MonthJarsDelivered">
+/// Jars issued so far in the current calendar month (app timezone, see AppTimeZone) — the running
+/// total the owner watches against the month's billing, alongside the lifetime figure.
+/// </param>
 public sealed record CustomerStatsDto(
     int LifetimeJarsDelivered,
+    int MonthJarsDelivered,
     decimal LifetimePayments,
     decimal AverageMonthlySpend,
-    // Item-wise breakdown of the lifetime jars delivered (issued) to this customer, per product.
+    // Item-wise breakdown of the jars delivered (issued) to this customer, per product.
     IReadOnlyList<JarsDeliveredByProductDto> JarsDeliveredByProduct);
 
-/// <summary>Lifetime jars delivered (issued) to a customer for one product.</summary>
-public sealed record JarsDeliveredByProductDto(string ProductName, string BottleSize, int Quantity);
+/// <summary>Jars delivered (issued) to a customer for one product: lifetime, and this month.</summary>
+public sealed record JarsDeliveredByProductDto(
+    string ProductName, string BottleSize, int Quantity, int MonthQuantity);
 
 /// <summary>Net jars a customer still holds for one product (Σ Issue − Σ Return). Guide §9.</summary>
 public sealed record CustomerJarBalanceDto(Guid ProductId, string ProductName, string BottleSize, int Outstanding);

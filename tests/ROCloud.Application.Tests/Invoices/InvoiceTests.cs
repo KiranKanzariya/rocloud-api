@@ -124,6 +124,29 @@ public class InvoiceTests
         Assert.Equal(600m, invoice.Discount);   // full subtotal waived
         Assert.Equal(0m, invoice.TaxAmount);     // GST on the discounted (zero) amount
         Assert.Equal(0m, invoice.TotalAmount);
+        // Nothing is owed, so it is settled on arrival — not left at Draft, which would contradict the
+        // PAID stamp the PDF derives from the balance and would keep the monthly job mailing it.
+        Assert.Equal(InvoiceStatus.Paid, invoice.Status);
+    }
+
+    [Fact]
+    public async Task GenerateInvoice_WhenEveryStopDeliveredZeroJars_IsRefused()
+    {
+        var (db, ctx) = NewDb();
+        var (customerId, from, to) = await SeedDeliveredOrdersAsync(db);
+
+        // The month's stops were all closed with nothing handed over (quantity = jars delivered), so
+        // there is nothing to bill — no invoice at all, rather than a ₹0 one with 0-jar lines.
+        foreach (var item in await db.OrderItems.ToListAsync())
+            item.Quantity = 0;
+        await db.SaveChangesAsync();
+
+        var handler = new GenerateInvoiceCommandHandler(db, ctx, new FakeAppSettings());
+        var ex = await Assert.ThrowsAsync<ValidationException>(() => handler.Handle(
+            new GenerateInvoiceCommand(customerId, from, to, null, null, null, null), CancellationToken.None));
+
+        Assert.True(ex.Errors.ContainsKey("period"));
+        Assert.Empty(await db.Invoices.ToListAsync());
     }
 
     [Fact]

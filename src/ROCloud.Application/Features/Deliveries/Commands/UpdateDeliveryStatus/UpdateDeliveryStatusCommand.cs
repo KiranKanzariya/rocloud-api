@@ -139,7 +139,7 @@ public class UpdateDeliveryStatusCommandHandler : IRequestHandler<UpdateDelivery
                 // only on the FIRST transition into Delivered; a repeat is a no-op success. (The UI
                 // already renders a Delivered stop read-only, so there is no legitimate re-submit.)
                 if (!alreadyDelivered)
-                    await ApplyDeliveredAsync(delivery, request, ct);
+                    await ApplyDeliveredAsync(delivery, request, today, ct);
                 break;
 
             case DeliveryStatus.Failed:
@@ -170,8 +170,15 @@ public class UpdateDeliveryStatusCommandHandler : IRequestHandler<UpdateDelivery
     }
 
     private async Task ApplyDeliveredAsync(
-        Delivery delivery, UpdateDeliveryStatusCommand request, CancellationToken ct)
+        Delivery delivery, UpdateDeliveryStatusCommand request, DateOnly today, CancellationToken ct)
     {
+        // The business day the jars moved. A stop closed after its scheduled day — a round entered the
+        // next morning, or a backdated order (UpdateOrder keeps ScheduledDate in sync with OrderDate) —
+        // must book its jar movements on the delivery's own day, so "jars delivered this month" counts
+        // them where the order is billed. A same-day stop (the normal case) stays null so the movement
+        // keeps the real clock time and today's movement list stays in true chronological order.
+        var movedOn = delivery.ScheduledDate < today ? delivery.ScheduledDate : (DateOnly?)null;
+
         delivery.DeliveredAt = DateTime.UtcNow;
         delivery.CollectedAmount = request.CollectedAmount ?? 0m;
         delivery.PaymentMethod = request.PaymentMethod is { } pm ? Enum.Parse<PaymentMethod>(pm) : null;
@@ -212,26 +219,27 @@ public class UpdateDeliveryStatusCommandHandler : IRequestHandler<UpdateDelivery
         // count is still accepted (legacy / single-item) and applied to the order's primary product.
         var customerId = delivery.Order?.CustomerId;
         if (request.Items is { Count: > 0 })
-            await ApplyPerItemAsync(delivery, request.Items, customerId, ct);
+            await ApplyPerItemAsync(delivery, request.Items, customerId, movedOn, ct);
         else
-            await ApplySingleCountAsync(delivery, request, customerId, ct);
+            await ApplySingleCountAsync(delivery, request, customerId, movedOn, ct);
 
         // Empties returned for products that aren't on this order (e.g. a 20L brought back during an
         // 18L delivery). These reduce that product's customer balance but don't belong to any order item,
         // so they're recorded purely as customer-scoped Return movements (visible in the return history).
         if (request.OtherReturns is { Count: > 0 })
             foreach (var r in request.OtherReturns)
-                await _inventory.RecordReturnAsync(r.ProductId, r.Quantity, delivery.OrderId, customerId, ct);
+                await _inventory.RecordReturnAsync(r.ProductId, r.Quantity, delivery.OrderId, customerId, movedOn, ct);
 
         // Products handed over that weren't on the order (e.g. an 18L given when the ordered 20L was
         // refused). Each is added to the order as a new line so it is billed and inventoried like any
         // other item — the mirror of OtherReturns for deliveries.
         if (request.OtherDeliveries is { Count: > 0 })
-            await ApplyOtherDeliveriesAsync(delivery, request.OtherDeliveries, customerId, ct);
+            await ApplyOtherDeliveriesAsync(delivery, request.OtherDeliveries, customerId, movedOn, ct);
     }
 
     private async Task ApplyOtherDeliveriesAsync(
-        Delivery delivery, IReadOnlyList<OtherDeliveryInputDto> extras, Guid? customerId, CancellationToken ct)
+        Delivery delivery, IReadOnlyList<OtherDeliveryInputDto> extras, Guid? customerId,
+        DateOnly? movedOn, CancellationToken ct)
     {
         var productIds = extras.Select(e => e.ProductId).Distinct().ToList();
         var rates = await _db.Products
@@ -264,7 +272,7 @@ public class UpdateDeliveryStatusCommandHandler : IRequestHandler<UpdateDelivery
             };
             _db.OrderItems.Add(orderItem);
 
-            await _inventory.RecordIssueAsync(extra.ProductId, extra.Quantity, delivery.OrderId, customerId, ct);
+            await _inventory.RecordIssueAsync(extra.ProductId, extra.Quantity, delivery.OrderId, customerId, movedOn, ct);
 
             _db.DeliveryItems.Add(new DeliveryItem
             {
@@ -286,7 +294,8 @@ public class UpdateDeliveryStatusCommandHandler : IRequestHandler<UpdateDelivery
     }
 
     private async Task ApplyPerItemAsync(
-        Delivery delivery, IReadOnlyList<DeliveryItemInputDto> items, Guid? customerId, CancellationToken ct)
+        Delivery delivery, IReadOnlyList<DeliveryItemInputDto> items, Guid? customerId,
+        DateOnly? movedOn, CancellationToken ct)
     {
         // Tracked (not projected) so each line's Quantity can be rewritten to the jars actually
         // delivered — see below. Resolves each input to a real order item of THIS order.
@@ -314,9 +323,9 @@ public class UpdateDeliveryStatusCommandHandler : IRequestHandler<UpdateDelivery
             orderItem.Quantity = item.JarsDelivered;
 
             if (item.JarsDelivered > 0)
-                await _inventory.RecordIssueAsync(productId, item.JarsDelivered, delivery.OrderId, customerId, ct);
+                await _inventory.RecordIssueAsync(productId, item.JarsDelivered, delivery.OrderId, customerId, movedOn, ct);
             if (item.JarsReturned > 0)
-                await _inventory.RecordReturnAsync(productId, item.JarsReturned, delivery.OrderId, customerId, ct);
+                await _inventory.RecordReturnAsync(productId, item.JarsReturned, delivery.OrderId, customerId, movedOn, ct);
 
             _db.DeliveryItems.Add(new DeliveryItem
             {
@@ -339,7 +348,8 @@ public class UpdateDeliveryStatusCommandHandler : IRequestHandler<UpdateDelivery
     }
 
     private async Task ApplySingleCountAsync(
-        Delivery delivery, UpdateDeliveryStatusCommand request, Guid? customerId, CancellationToken ct)
+        Delivery delivery, UpdateDeliveryStatusCommand request, Guid? customerId,
+        DateOnly? movedOn, CancellationToken ct)
     {
         delivery.JarsDelivered = request.JarsDelivered ?? 0;
         delivery.JarsReturned = request.JarsReturned ?? 0;
@@ -367,8 +377,8 @@ public class UpdateDeliveryStatusCommandHandler : IRequestHandler<UpdateDelivery
 
         var pid = primary.ProductId;
         if (delivery.JarsDelivered is { } delivered && delivered > 0)
-            await _inventory.RecordIssueAsync(pid, delivered, delivery.OrderId, customerId, ct);
+            await _inventory.RecordIssueAsync(pid, delivered, delivery.OrderId, customerId, movedOn, ct);
         if (delivery.JarsReturned is { } returned && returned > 0)
-            await _inventory.RecordReturnAsync(pid, returned, delivery.OrderId, customerId, ct);
+            await _inventory.RecordReturnAsync(pid, returned, delivery.OrderId, customerId, movedOn, ct);
     }
 }

@@ -118,9 +118,13 @@ public static class InvoiceAllocationSync
         //    status it was given (SendInvoice owns that transition). But because this is a full
         //    recompute it must also DEMOTE: if the money behind a Paid invoice went away (a payment
         //    that failed, an opening balance cleared), it must stop claiming to be paid.
+        //    A zero-total invoice (a customer on a 100% discount) is settled the moment it is raised —
+        //    nothing will ever be paid against it, so without this it would sit at Draft forever while
+        //    its PDF, which reads the balance, stamps PAID. Generation refuses to raise an invoice with
+        //    no delivered orders, so a zero total here always means "billed, then fully waived".
         foreach (var invoice in invoices)
         {
-            invoice.Status = invoice.TotalAmount > 0m && invoice.PaidAmount >= invoice.TotalAmount
+            invoice.Status = invoice.PaidAmount >= invoice.TotalAmount
                 ? InvoiceStatus.Paid
                 : invoice.PaidAmount > 0m
                     ? InvoiceStatus.PartiallyPaid

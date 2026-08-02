@@ -331,6 +331,83 @@ public class DeliveryTests
     }
 
     [Fact]
+    public async Task UpdateDeliveryStatus_ClosedAfterItsDay_StampsJarMovementsOnTheDeliveryDay()
+    {
+        // A round entered the next morning (or a backdated order — UpdateOrder keeps ScheduledDate in
+        // sync with OrderDate). The jars moved on the stop's own day, so the movement must be booked
+        // there: otherwise "jars delivered this month" credits the month it was typed in, and a stop
+        // from the 30th lands in the next month's figure.
+        var (db, ctx) = NewDb();
+        var (order, delivery) = await SeedOrderWithDeliveryAsync(db);
+
+        var productId = Guid.NewGuid();
+        db.Products.Add(new Product
+        {
+            Id = productId, TenantId = TenantA, Name = "20L Jar", BottleSize = BottleSize.TwentyL, DefaultRate = 40m
+        });
+        db.OrderItems.Add(new OrderItem
+        {
+            Id = Guid.NewGuid(), TenantId = TenantA, OrderId = order.Id, ProductId = productId,
+            Quantity = 2, OrderedQuantity = 2, UnitRate = 40m
+        });
+        var deliveredOn = AppTimeZone.Today(DateTime.UtcNow).AddDays(-3);
+        delivery.ScheduledDate = deliveredOn;
+        await db.SaveChangesAsync();
+
+        var currentUser = new FakeCurrentUser { UserId = Guid.NewGuid(), TenantId = TenantA, Permissions = CanViewAll };
+        await new UpdateDeliveryStatusCommandHandler(
+            db, ctx, currentUser, new InventoryService(db, ctx, currentUser),
+            NullLogger<UpdateDeliveryStatusCommandHandler>.Instance).Handle(
+            new UpdateDeliveryStatusCommand(delivery.Id, nameof(DeliveryStatus.Delivered),
+                JarsDelivered: 2, JarsReturned: 1, CollectedAmount: 0m, PaymentMethod: null,
+                ProofImageUrl: null, Latitude: null, Longitude: null, Notes: null), CancellationToken.None);
+
+        // Both legs of the visit (jars out and empties back) are booked on the delivery day.
+        var movements = await db.InventoryMovements.Where(m => m.CustomerId == order.CustomerId).ToListAsync();
+        Assert.Equal(2, movements.Count);
+        Assert.All(movements, m => Assert.Equal(deliveredOn, AppTimeZone.Today(m.CreatedAt)));
+
+        // DeliveredAt still records when it was actually entered — the audit trail isn't rewritten.
+        var updated = await db.Deliveries.FirstAsync(d => d.Id == delivery.Id);
+        Assert.True(updated.DeliveredAt > DateTime.UtcNow.AddMinutes(-5));
+    }
+
+    [Fact]
+    public async Task UpdateDeliveryStatus_SameDayStop_KeepsTheRealClockTimeOnMovements()
+    {
+        // The normal case: closed on its own day. Nothing is rewritten — the movement keeps "now", so
+        // today's jar history stays in true chronological order rather than collapsing onto midday.
+        var (db, ctx) = NewDb();
+        var (order, delivery) = await SeedOrderWithDeliveryAsync(db);
+
+        var productId = Guid.NewGuid();
+        db.Products.Add(new Product
+        {
+            Id = productId, TenantId = TenantA, Name = "20L Jar", BottleSize = BottleSize.TwentyL, DefaultRate = 40m
+        });
+        db.OrderItems.Add(new OrderItem
+        {
+            Id = Guid.NewGuid(), TenantId = TenantA, OrderId = order.Id, ProductId = productId,
+            Quantity = 2, OrderedQuantity = 2, UnitRate = 40m
+        });
+        delivery.ScheduledDate = AppTimeZone.Today(DateTime.UtcNow);
+        await db.SaveChangesAsync();
+
+        var before = DateTime.UtcNow;
+        var currentUser = new FakeCurrentUser { UserId = Guid.NewGuid(), TenantId = TenantA, Permissions = CanViewAll };
+        await new UpdateDeliveryStatusCommandHandler(
+            db, ctx, currentUser, new InventoryService(db, ctx, currentUser),
+            NullLogger<UpdateDeliveryStatusCommandHandler>.Instance).Handle(
+            new UpdateDeliveryStatusCommand(delivery.Id, nameof(DeliveryStatus.Delivered),
+                JarsDelivered: 2, JarsReturned: 0, CollectedAmount: 0m, PaymentMethod: null,
+                ProofImageUrl: null, Latitude: null, Longitude: null, Notes: null), CancellationToken.None);
+
+        var issue = await db.InventoryMovements.FirstAsync(
+            m => m.CustomerId == order.CustomerId && m.MovementType == InventoryMovementType.Issue);
+        Assert.InRange(issue.CreatedAt, before, DateTime.UtcNow);
+    }
+
+    [Fact]
     public async Task UpdateDeliveryStatus_DeliveryBoy_CannotUpdateAnotherBoysStop()
     {
         var (db, ctx) = NewDb();

@@ -97,7 +97,7 @@ public class SetCustomerOpeningBalanceCommandHandler : IRequestHandler<SetCustom
 
         // 1) Empties held → one Issue movement per product, scoped to the customer.
         foreach (var jar in request.Jars.Where(j => j.Quantity > 0))
-            await RecordOpeningIssueAsync(jar.ProductId, jar.Quantity, customer.Id, note, ct);
+            await RecordOpeningIssueAsync(jar.ProductId, jar.Quantity, customer.Id, note, request.CutoverDate, ct);
 
         // 2) Money: dues → opening invoice; advance → credit payment.
         Invoice? openingInvoice = null;
@@ -129,7 +129,8 @@ public class SetCustomerOpeningBalanceCommandHandler : IRequestHandler<SetCustom
             });
     }
 
-    private async Task RecordOpeningIssueAsync(Guid productId, int quantity, Guid customerId, string note, CancellationToken ct)
+    private async Task RecordOpeningIssueAsync(
+        Guid productId, int quantity, Guid customerId, string note, DateOnly cutover, CancellationToken ct)
     {
         var inv = await _db.Inventories.FirstOrDefaultAsync(i => i.ProductId == productId, ct);
         if (inv is null)
@@ -155,7 +156,11 @@ public class SetCustomerOpeningBalanceCommandHandler : IRequestHandler<SetCustom
             MovementType = InventoryMovementType.Issue,
             Quantity = quantity,
             PerformedBy = _currentUser.UserId,
-            Notes = note
+            Notes = note,
+            // Stamped on the cutover day, not the day the migration was run: these jars were handed over
+            // before ROCloud, so a period report ("jars delivered this month") must not count a whole
+            // book's opening float as this month's business just because onboarding happened today.
+            CreatedAt = AppTimeZone.MiddayUtc(cutover)
         });
     }
 

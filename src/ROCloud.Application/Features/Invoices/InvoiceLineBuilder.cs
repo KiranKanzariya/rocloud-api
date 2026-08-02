@@ -23,7 +23,12 @@ internal static class InvoiceLineBuilder
                         && i.Order.CustomerId == customerId
                         && i.Order.Status == OrderStatus.Delivered
                         && i.Order.OrderDate >= from
-                        && i.Order.OrderDate <= to)
+                        && i.Order.OrderDate <= to
+                        // Quantity is rewritten at delivery to the jars actually handed over, so a stop
+                        // closed with nothing delivered leaves a 0-jar line worth ₹0. Excluded: it bills
+                        // nothing, it reads as noise on the PDF, and a period with only such lines must
+                        // count as "no delivered orders" so generation refuses to raise an empty invoice.
+                        && i.Quantity > 0)
             .GroupBy(i => new { i.ProductId, ProductName = i.Product!.Name, i.Product.BottleSize, i.Product.Hsn, i.UnitRate })
             .Select(g => new
             {
