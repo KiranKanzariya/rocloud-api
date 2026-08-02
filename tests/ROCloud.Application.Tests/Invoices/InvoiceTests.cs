@@ -130,6 +130,46 @@ public class InvoiceTests
     }
 
     [Fact]
+    public async Task GenerateInvoice_ForAPeriodAlreadyInvoiced_IsRefusedAndNamesTheInvoice()
+    {
+        var (db, ctx) = NewDb();
+        var (customerId, from, to) = await SeedDeliveredOrdersAsync(db);
+
+        var handler = new GenerateInvoiceCommandHandler(db, ctx, new FakeAppSettings());
+        var command = new GenerateInvoiceCommand(customerId, from, to, null, null, null, null);
+        await handler.Handle(command, CancellationToken.None);
+
+        // A second run for the same period would be summed gross into the customer's balance, doubling
+        // what they are chased for — so it is refused, naming the invoice that already covers it.
+        var ex = await Assert.ThrowsAsync<ValidationException>(
+            () => handler.Handle(command, CancellationToken.None));
+
+        Assert.Contains("0001", ex.Errors["period"][0]);
+        Assert.Single(await db.Invoices.ToListAsync());
+    }
+
+    [Fact]
+    public async Task GenerateInvoice_ForAPeriodWhoseOnlyInvoiceIsCancelled_IsAllowed()
+    {
+        var (db, ctx) = NewDb();
+        var (customerId, from, to) = await SeedDeliveredOrdersAsync(db);
+
+        var handler = new GenerateInvoiceCommandHandler(db, ctx, new FakeAppSettings());
+        var command = new GenerateInvoiceCommand(customerId, from, to, null, null, null, null);
+        var firstId = await handler.Handle(command, CancellationToken.None);
+
+        // Cancelled invoices are excluded from every balance sum, so the period is billable again —
+        // this is how an owner re-issues a mistaken invoice.
+        (await db.Invoices.FirstAsync(i => i.Id == firstId)).Status = InvoiceStatus.Cancelled;
+        await db.SaveChangesAsync();
+
+        var secondId = await handler.Handle(command, CancellationToken.None);
+
+        Assert.NotEqual(firstId, secondId);
+        Assert.Equal(2, await db.Invoices.CountAsync());
+    }
+
+    [Fact]
     public async Task GenerateInvoice_WhenEveryStopDeliveredZeroJars_IsRefused()
     {
         var (db, ctx) = NewDb();

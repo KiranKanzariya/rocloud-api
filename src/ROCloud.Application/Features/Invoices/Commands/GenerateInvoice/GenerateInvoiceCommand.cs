@@ -57,6 +57,28 @@ public class GenerateInvoiceCommandHandler : IRequestHandler<GenerateInvoiceComm
         var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == request.CustomerId, ct)
                        ?? throw new NotFoundException("Customer", request.CustomerId);
 
+        // One invoice per customer per period. The bulk/monthly path already skips a customer who has
+        // one (BulkGenerateInvoices), and this path must refuse for the same reason: a customer's
+        // balance sums invoices GROSS (CustomerBalance), so a second invoice for the same month
+        // silently doubles what they owe — and the dues report and payment reminders chase that figure.
+        var duplicate = await _db.Invoices
+            .Where(i => i.CustomerId == customer.Id
+                        && i.PeriodFrom == request.PeriodFrom
+                        && i.PeriodTo == request.PeriodTo
+                        && i.Status != InvoiceStatus.Cancelled)
+            .Select(i => i.InvoiceNumber)
+            .FirstOrDefaultAsync(ct);
+
+        if (duplicate is not null)
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["period"] =
+                [
+                    $"This customer already has invoice {duplicate} for " +
+                    $"{request.PeriodFrom:dd MMM yyyy} – {request.PeriodTo:dd MMM yyyy}."
+                ]
+            });
+
         var lines = await InvoiceLineBuilder.BuildAsync(
             _db, customer.Id, request.PeriodFrom, request.PeriodTo, ct);
 
