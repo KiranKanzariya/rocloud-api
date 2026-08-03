@@ -227,7 +227,29 @@ if (!app.Environment.IsDevelopment())
     });
 }
 
-app.UseSerilogRequestLogging();
+// One Information row per request. The health endpoints are polled every few seconds by the
+// platform's prober, which wrote ~17k identical "GET /health/live responded 200" rows a day into the
+// `logs` table and buried the prod stack traces that table exists for.
+//
+// So: SUCCESSFUL probes drop to Verbose — below MinimumLevel.Information, so no sink ever sees them
+// — while every other request keeps Serilog's default levelling. A probe that FAILS still logs at
+// Error, because a health check going red is precisely what we want kept.
+//
+// This is deliberately not a MinimumLevel.Override: the request summary is logged by
+// Serilog.AspNetCore.RequestLoggingMiddleware, so the "Microsoft*" overrides above never applied to
+// it, and silencing that source wholesale would lose real request logging too.
+app.UseSerilogRequestLogging(options =>
+{
+    options.GetLevel = (ctx, _, ex) =>
+        ex is not null || ctx.Response.StatusCode >= 500 ? LogEventLevel.Error
+        : IsHealthProbe(ctx.Request.Path) ? LogEventLevel.Verbose
+        : LogEventLevel.Information;
+});
+
+// The anonymous probe endpoints mapped below: /health/live, /health/ready, /health/startup and the
+// legacy /api/health. StartsWithSegments matches on segment boundaries, so "/healthz" would not.
+static bool IsHealthProbe(PathString path)
+    => path.StartsWithSegments("/health") || path.StartsWithSegments("/api/health");
 
 var locOptions = app.Services.GetRequiredService<IOptions<RequestLocalizationOptions>>();
 app.UseRequestLocalization(locOptions.Value);
