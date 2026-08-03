@@ -19,7 +19,17 @@ public sealed record BulkGenerateInvoicesCommand(
     DateOnly PeriodFrom, DateOnly PeriodTo, decimal? GstRate, int? DueInDays)
     : IRequest<BulkInvoiceResultDto>;
 
-public sealed record BulkInvoiceResultDto(int InvoicesCreated, int CustomersConsidered, int Skipped);
+/// <param name="Skipped">Total skipped = <paramref name="SkippedAlreadyInvoiced"/> + <paramref name="SkippedNothingDelivered"/>.</param>
+/// <param name="SkippedAlreadyInvoiced">
+/// Held an overlapping invoice, so the month was NOT billed and the owner must raise the remaining days
+/// by hand. Broken out from the total because this one needs someone to act; a quiet month does not.
+/// </param>
+public sealed record BulkInvoiceResultDto(
+    int InvoicesCreated,
+    int CustomersConsidered,
+    int Skipped,
+    int SkippedAlreadyInvoiced = 0,
+    int SkippedNothingDelivered = 0);
 
 public class BulkGenerateInvoicesCommandHandler
     : IRequestHandler<BulkGenerateInvoicesCommand, BulkInvoiceResultDto>
@@ -57,25 +67,32 @@ public class BulkGenerateInvoicesCommandHandler
         // a count re-mints an existing number when there is any gap; see InvoiceNumberGenerator).
         var seq = await InvoiceNumberGenerator.MaxSeqAsync(_db, _tenant.TenantId, invoiceDate, ct);
 
-        // Idempotency guard: customers who already have a non-cancelled invoice for this exact period
-        // are skipped, so a re-run (admin "run now", owner re-trigger, retry) never double-bills them.
+        // Idempotency guard: customers who already hold a non-cancelled invoice OVERLAPPING this period
+        // are skipped. Exact-period matching would only catch a re-run (admin "run now", owner re-trigger,
+        // retry); it would miss a manual invoice covering part of the month — say 05–10 Jul raised for a
+        // customer's function — and bill those days a second time. A customer's balance sums invoices
+        // GROSS (CustomerBalance), so that is real money added to what they are chased for.
+        // The trade-off: the rest of that month is then NOT auto-billed, and the owner must raise it by
+        // hand. Under-billing is recoverable, double-billing costs trust — hence the skip, and hence the
+        // per-customer log below so it is never silent.
         var alreadyInvoiced = (await _db.Invoices
-                .Where(i => i.PeriodFrom == request.PeriodFrom && i.PeriodTo == request.PeriodTo
-                            && i.Status != InvoiceStatus.Cancelled)
+                .Where(i => i.Status != InvoiceStatus.Cancelled
+                            && i.PeriodFrom <= request.PeriodTo && i.PeriodTo >= request.PeriodFrom)
                 .Select(i => i.CustomerId)
                 .ToListAsync(ct))
             .ToHashSet();
 
         var created = 0;
-        var skipped = 0;
+        var skippedInvoiced = 0;
+        var skippedEmpty = 0;
         var billed = new List<Guid>();
 
         foreach (var c in customers)
         {
-            if (alreadyInvoiced.Contains(c.Id)) { skipped++; continue; } // already billed for this period
+            if (alreadyInvoiced.Contains(c.Id)) { skippedInvoiced++; continue; } // overlapping invoice
 
             var lines = await InvoiceLineBuilder.BuildAsync(_db, c.Id, request.PeriodFrom, request.PeriodTo, ct);
-            if (lines.Count == 0) { skipped++; continue; }
+            if (lines.Count == 0) { skippedEmpty++; continue; }
 
             var subTotal = lines.Sum(l => l.Amount);
             // Each customer's standing (platform-set) discount applies automatically.
@@ -129,6 +146,7 @@ public class BulkGenerateInvoicesCommandHandler
             if (tx is not null) await tx.CommitAsync(ct);
         }
 
-        return new BulkInvoiceResultDto(created, customers.Count, skipped);
+        return new BulkInvoiceResultDto(
+            created, customers.Count, skippedInvoiced + skippedEmpty, skippedInvoiced, skippedEmpty);
     }
 }

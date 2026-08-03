@@ -5,7 +5,7 @@ namespace ROCloud.Application.Features.Auth.Commands.Register;
 
 public class RegisterCommandValidator : AbstractValidator<RegisterCommand>
 {
-    private static readonly string[] PlanTypes = ["Basic", "Pro", "Enterprise"];
+    private static readonly string[] PlanTypes = ["Starter", "Basic", "Pro", "Enterprise"];
 
     public RegisterCommandValidator()
     {

@@ -111,6 +111,8 @@ public static class DependencyInjection
         // Invoice PDF generation (guide §10) via QuestPDF.
         services.AddSingleton<IInvoicePdfGenerator, ROCloud.Infrastructure.Pdf.InvoicePdfGenerator>();
         services.AddSingleton<ISubscriptionInvoicePdfGenerator, ROCloud.Infrastructure.Pdf.SubscriptionInvoicePdfGenerator>();
+        // Delivery statement — proof of supply for a date range; bills nothing (see StatementPdfGenerator).
+        services.AddSingleton<IStatementPdfGenerator, ROCloud.Infrastructure.Pdf.StatementPdfGenerator>();
 
         // Subscription-invoice PDF + owner email delivery (guide §25/§26).
         services.AddScoped<

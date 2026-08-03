@@ -44,6 +44,38 @@ public class SubscriptionDiscountTests
         Assert.Equal(expected, SubscriptionDiscountCalculator.Net(t, value, price));
     }
 
+    /// <summary>
+    /// The 2026-08 India repricing raised Enterprise from ₹5,999 to ₹7,999 (₹59,990 → ₹79,990
+    /// yearly). Existing Enterprise tenants keep their old rate through a standing 25% discount
+    /// rather than a second plan row.
+    ///
+    /// It has to be Percentage, not Fixed: the discount applies to whichever gross is being billed,
+    /// so a Fixed ₹2,000 would be right monthly and leave a yearly tenant paying ₹77,990 instead of
+    /// ₹59,990. The old and new prices happen to sit at exactly 0.75 on BOTH cycles, so one
+    /// percentage grandfathers monthly and yearly tenants alike — that is why this number works, and
+    /// why it must be rechecked if either price moves again.
+    /// </summary>
+    [Theory]
+    [InlineData(7999, 5999.25)]     // monthly: was ₹5,999
+    [InlineData(79990, 59992.50)]   // yearly:  was ₹59,990
+    public void LegacyEnterpriseRate_IsHeldByAPercentageOnBothCycles(decimal gross, decimal expectedNet)
+    {
+        var net = SubscriptionDiscountCalculator.Net(SubscriptionDiscountType.Percentage, 25m, gross);
+
+        Assert.Equal(expectedNet, net);
+    }
+
+    [Fact]
+    public void AFixedDiscountWouldNotGrandfatherAYearlyTenant()
+    {
+        // Documents the trap rather than the fix: ₹2,000 off the yearly gross leaves them ₹18,000
+        // worse off than the ₹59,990 they used to pay.
+        var net = SubscriptionDiscountCalculator.Net(SubscriptionDiscountType.Fixed, 2000m, 79990m);
+
+        Assert.Equal(77990m, net);
+        Assert.NotEqual(59990m, net);
+    }
+
     // ── set discount command ────────────────────────────────────────────────
     [Fact]
     public async Task SetDiscount_PersistsTypeAndValue()

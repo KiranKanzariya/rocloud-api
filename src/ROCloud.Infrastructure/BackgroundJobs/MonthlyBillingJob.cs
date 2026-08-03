@@ -35,8 +35,18 @@ public class MonthlyBillingJob
             var mediator = sp.GetRequiredService<IMediator>();
             var result = await mediator.Send(new BulkGenerateInvoicesCommand(from, to, null, null), token);
             _logger.LogInformation(
-                "MonthlyBilling: tenant {TenantId} generated {Count} invoice(s) for {From}..{To}",
-                tenantId, result.InvoicesCreated, from, to);
+                "MonthlyBilling: tenant {TenantId} generated {Count} of {Considered} invoice(s) for {From}..{To}; " +
+                "skipped {SkippedTotal} ({AlreadyInvoiced} already invoiced, {NothingDelivered} nothing delivered)",
+                tenantId, result.InvoicesCreated, result.CustomersConsidered, from, to,
+                result.Skipped, result.SkippedAlreadyInvoiced, result.SkippedNothingDelivered);
+
+            // A customer skipped for holding an overlapping invoice is NOT billed for the rest of the
+            // month — that needs a human. Logged at warning so it stands out from the routine counts.
+            if (result.SkippedAlreadyInvoiced > 0)
+                _logger.LogWarning(
+                    "MonthlyBilling: tenant {TenantId} — {Count} customer(s) already hold an invoice overlapping "
+                    + "{From}..{To}; the remaining days of that period must be invoiced manually",
+                    tenantId, result.SkippedAlreadyInvoiced, from, to);
 
             // Send each freshly-generated invoice (best-effort; one failure shouldn't stop the rest).
             var db = sp.GetRequiredService<IAppDbContext>();

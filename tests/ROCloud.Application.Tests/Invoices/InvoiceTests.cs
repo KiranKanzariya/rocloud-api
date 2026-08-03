@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using ROCloud.Application.Features.Invoices.Commands.BulkGenerateInvoices;
 using ROCloud.Application.Features.Invoices.Commands.GenerateInvoice;
 using ROCloud.Application.Tests.Auth;
 using ROCloud.Domain.Entities.Platform;
@@ -145,6 +146,51 @@ public class InvoiceTests
             () => handler.Handle(command, CancellationToken.None));
 
         Assert.Contains("0001", ex.Errors["period"][0]);
+        Assert.Single(await db.Invoices.ToListAsync());
+    }
+
+    [Fact]
+    public async Task BulkGenerate_SkipsACustomerHoldingAnInvoiceThatOverlapsThePeriod()
+    {
+        var (db, ctx) = NewDb();
+        var (customerId, from, to) = await SeedDeliveredOrdersAsync(db);
+
+        // The owner raised ONE day of the month by hand (a function billed separately). The seeded
+        // deliveries are dated today, so that day is the one with orders on it.
+        var functionDay = DateOnly.FromDateTime(DateTime.UtcNow);
+        var handler = new GenerateInvoiceCommandHandler(db, ctx, new FakeAppSettings());
+        await handler.Handle(
+            new GenerateInvoiceCommand(customerId, functionDay, functionDay, null, null, null, null),
+            CancellationToken.None);
+
+        // Month-end must NOT bill the whole month on top of it — those days are already invoiced, and
+        // balances sum invoices gross, so the overlap would be charged twice.
+        var bulk = new BulkGenerateInvoicesCommandHandler(db, ctx, new FakeAppSettings());
+        var result = await bulk.Handle(new BulkGenerateInvoicesCommand(from, to, null, null), CancellationToken.None);
+
+        Assert.Equal(0, result.InvoicesCreated);
+        Assert.Equal(1, result.SkippedAlreadyInvoiced);
+        Assert.Equal(0, result.SkippedNothingDelivered);
+        Assert.Single(await db.Invoices.ToListAsync());
+    }
+
+    [Fact]
+    public async Task GenerateInvoice_ForAPeriodOverlappingAnExistingInvoice_IsRefused()
+    {
+        var (db, ctx) = NewDb();
+        var (customerId, from, to) = await SeedDeliveredOrdersAsync(db);
+
+        var handler = new GenerateInvoiceCommandHandler(db, ctx, new FakeAppSettings());
+        await handler.Handle(
+            new GenerateInvoiceCommand(customerId, from, to, null, null, null, null), CancellationToken.None);
+
+        // A few days INSIDE the month already invoiced: the orders it would bill are the same ones the
+        // month invoice billed, and both totals are summed gross into the customer's balance.
+        var ex = await Assert.ThrowsAsync<ValidationException>(() => handler.Handle(
+            new GenerateInvoiceCommand(customerId, from.AddDays(4), from.AddDays(9), null, null, null, null),
+            CancellationToken.None));
+
+        Assert.Contains("overlaps", ex.Errors["period"][0]);
         Assert.Single(await db.Invoices.ToListAsync());
     }
 

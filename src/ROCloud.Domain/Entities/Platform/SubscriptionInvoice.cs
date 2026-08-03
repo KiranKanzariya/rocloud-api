@@ -16,7 +16,7 @@ public class SubscriptionInvoice : BaseEntity
     /// <summary>Human-friendly, globally unique, e.g. <c>SUB-2026-000042</c>.</summary>
     public string InvoiceNumber { get; set; } = string.Empty;
 
-    public string PlanType { get; set; } = string.Empty;      // Basic | Pro | Enterprise
+    public string PlanType { get; set; } = string.Empty;      // Starter | Basic | Pro | Enterprise
     public string BillingCycle { get; set; } = "Monthly";     // Monthly | Yearly
 
     public DateOnly PeriodStart { get; set; }

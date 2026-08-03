@@ -5,7 +5,7 @@ using ROCloud.Application.Features.Plans.Dtos;
 
 namespace ROCloud.Application.Features.Plans.Queries.GetPlans;
 
-/// <summary>Lists the active subscription plans (Basic / Pro / Enterprise), cheapest first.</summary>
+/// <summary>Lists the active subscription plans (Starter / Basic / Pro / Enterprise), cheapest first.</summary>
 public sealed record GetPlansQuery : IRequest<IReadOnlyList<PlanDto>>;
 
 public class GetPlansQueryHandler : IRequestHandler<GetPlansQuery, IReadOnlyList<PlanDto>>

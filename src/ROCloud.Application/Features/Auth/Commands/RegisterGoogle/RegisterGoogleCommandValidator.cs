@@ -4,7 +4,7 @@ namespace ROCloud.Application.Features.Auth.Commands.RegisterGoogle;
 
 public class RegisterGoogleCommandValidator : AbstractValidator<RegisterGoogleCommand>
 {
-    private static readonly string[] PlanTypes = ["Basic", "Pro", "Enterprise"];
+    private static readonly string[] PlanTypes = ["Starter", "Basic", "Pro", "Enterprise"];
 
     public RegisterGoogleCommandValidator()
     {

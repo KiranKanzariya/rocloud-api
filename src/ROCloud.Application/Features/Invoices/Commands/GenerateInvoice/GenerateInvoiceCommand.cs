@@ -57,25 +57,29 @@ public class GenerateInvoiceCommandHandler : IRequestHandler<GenerateInvoiceComm
         var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == request.CustomerId, ct)
                        ?? throw new NotFoundException("Customer", request.CustomerId);
 
-        // One invoice per customer per period. The bulk/monthly path already skips a customer who has
-        // one (BulkGenerateInvoices), and this path must refuse for the same reason: a customer's
-        // balance sums invoices GROSS (CustomerBalance), so a second invoice for the same month
-        // silently doubles what they owe — and the dues report and payment reminders chase that figure.
-        var duplicate = await _db.Invoices
+        // A customer's periods may not overlap. Their balance sums invoices GROSS (CustomerBalance), so
+        // any second invoice covering days already billed silently inflates what they owe — and the dues
+        // report and payment reminders chase that figure. Overlap, not equality: billing 05–10 Jul on top
+        // of 01–31 Jul re-bills the very same orders, since BackdatedOrderGuard already forbids adding an
+        // order into an invoiced period, so a narrower re-run can never pick up anything new.
+        // Period-less invoices (opening balance) compare as NULL and correctly never block.
+        var overlapping = await _db.Invoices
             .Where(i => i.CustomerId == customer.Id
-                        && i.PeriodFrom == request.PeriodFrom
-                        && i.PeriodTo == request.PeriodTo
-                        && i.Status != InvoiceStatus.Cancelled)
-            .Select(i => i.InvoiceNumber)
+                        && i.Status != InvoiceStatus.Cancelled
+                        && i.PeriodFrom <= request.PeriodTo
+                        && i.PeriodTo >= request.PeriodFrom)
+            .OrderBy(i => i.PeriodFrom)
+            .Select(i => new { i.InvoiceNumber, i.PeriodFrom, i.PeriodTo })
             .FirstOrDefaultAsync(ct);
 
-        if (duplicate is not null)
+        if (overlapping is not null)
             throw new ValidationException(new Dictionary<string, string[]>
             {
                 ["period"] =
                 [
-                    $"This customer already has invoice {duplicate} for " +
-                    $"{request.PeriodFrom:dd MMM yyyy} – {request.PeriodTo:dd MMM yyyy}."
+                    $"This customer already has invoice {overlapping.InvoiceNumber} covering " +
+                    $"{overlapping.PeriodFrom!.Value:dd MMM yyyy} – {overlapping.PeriodTo!.Value:dd MMM yyyy}, " +
+                    "which overlaps the selected period."
                 ]
             });
 

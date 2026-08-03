@@ -8,6 +8,10 @@ namespace ROCloud.Application.Tests.Subscriptions;
 /// Worked example throughout — a tenant on Basic ₹1,099, cycle 8 Jul → 8 Aug (31 days), changing plan
 /// on 27 Jul with 12 days left. Pro is ₹2,499 and Enterprise ₹5,999.
 ///
+/// Those amounts are FIXTURE values for the arithmetic below, not the live price list (the 2026-08
+/// repricing moved Basic to ₹999 and Enterprise to ₹7,999). What is under test here is proration, so
+/// the numbers are deliberately left alone — every expected value is hand-computed against them.
+///
 /// Before this split, a plan change ran through the RENEWAL path: it charged the full plan price and
 /// pushed the end date out a whole cycle. Changing tier twice in one afternoon silently bought two
 /// extra months, and left the tenant on the dearer plan while an invoice for the cheaper one covered

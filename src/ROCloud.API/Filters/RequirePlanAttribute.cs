@@ -8,8 +8,8 @@ namespace ROCloud.API.Filters;
 
 /// <summary>
 /// Requires the tenant's plan to be at least the given tier. Returns 403 with an upgrade hint otherwise.
-/// Tier order is the PlanType declaration order (Basic &lt; Pro &lt; Enterprise), which the plans.plan_type
-/// CHECK constraint mirrors.
+/// Tier order is the PlanType declaration order (Starter &lt; Basic &lt; Pro &lt; Enterprise), which the
+/// plans.plan_type CHECK constraint mirrors.
 ///
 /// The tier is read from the database, not from the JWT's plan_type claim: the admin portal can change a
 /// tenant's plan without re-issuing that tenant's token, so the claim lags by up to an access-token

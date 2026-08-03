@@ -20,6 +20,7 @@ using ROCloud.Application.Features.Customers.Queries.GetCustomerJarBalance;
 using ROCloud.Application.Features.Customers.Queries.GetCustomerOpeningBalance;
 using ROCloud.Application.Features.Customers.Queries.GetCustomers;
 using ROCloud.Application.Features.Customers.Queries.GetCustomerStats;
+using ROCloud.Application.Features.Statements.Queries.GetCustomerStatementPdf;
 
 namespace ROCloud.API.Controllers.Tenant;
 
@@ -53,6 +54,20 @@ public class CustomersController : ControllerBase
     public async Task<IActionResult> GetJarBalance(Guid id, CancellationToken ct)
         => Ok(ApiResponse<IReadOnlyList<CustomerJarBalanceDto>>.Ok(
             await _mediator.Send(new GetCustomerJarBalanceQuery(id), ct)));
+
+    /// <summary>
+    /// Delivery statement PDF for a date range — what was supplied, day by day. A record of supply, not
+    /// a bill: it has no invoice number and no ledger effect, so it may be produced any number of times
+    /// for any range (including one already invoiced). Gated on Invoices.View since it exposes rates.
+    /// </summary>
+    [HttpGet("{id:guid}/statement")]
+    [RequirePermission("Invoices.View")]
+    public async Task<IActionResult> GetStatementPdf(
+        Guid id, [FromQuery] DateOnly from, [FromQuery] DateOnly to, CancellationToken ct)
+    {
+        var result = await _mediator.Send(new GetCustomerStatementPdfQuery(id, from, to), ct);
+        return File(result.Content, "application/pdf", result.FileName);
+    }
 
     [HttpPost]
     [RequirePermission("Customers.Create")]
