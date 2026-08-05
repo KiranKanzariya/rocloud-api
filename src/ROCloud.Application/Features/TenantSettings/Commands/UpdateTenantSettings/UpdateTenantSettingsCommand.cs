@@ -22,7 +22,10 @@ public sealed record UpdateTenantSettingsCommand(
     string? Pincode,
     string? LogoUrl,
     string? PrimaryColor,
-    string DefaultLanguage) : IRequest;
+    string DefaultLanguage,
+    string? UpiVpa = null,
+    string? UpiPayeeName = null,
+    bool UpiQrEnabled = false) : IRequest;
 
 public class UpdateTenantSettingsCommandValidator : AbstractValidator<UpdateTenantSettingsCommand>
 {
@@ -45,6 +48,14 @@ public class UpdateTenantSettingsCommandValidator : AbstractValidator<UpdateTena
             .WithMessage("Primary colour must be a hex value like #0C447C.");
         RuleFor(c => c.LogoUrl).MaximumLength(500);
         RuleFor(c => c.DefaultLanguage).NotEmpty().MaximumLength(5);
+        // VPA shape only — "user@handle". Nothing can check the id actually exists or belongs to this
+        // tenant, so this stops typos, not mistakes; the customer verifies against the id printed on
+        // the invoice. Deliberately permissive on the handle (banks/PSPs keep adding new ones).
+        RuleFor(c => c.UpiVpa)
+            .Matches(@"^[a-zA-Z0-9.\-_]{2,64}@[a-zA-Z][a-zA-Z0-9.\-]{1,63}$")
+            .When(c => !string.IsNullOrWhiteSpace(c.UpiVpa))
+            .WithMessage("Enter a valid UPI ID, for example name@okaxis.");
+        RuleFor(c => c.UpiPayeeName).MaximumLength(100);
     }
 }
 
@@ -76,6 +87,22 @@ public class UpdateTenantSettingsCommandHandler : IRequestHandler<UpdateTenantSe
                 ["gstNumber"] = ["Enter your 15-digit GSTIN to charge GST, or keep GST off."]
             });
 
+        // Mirror of the GST rule: the QR cannot be TURNED ON without an id to pay into, or the invoice
+        // ships a scan-to-pay block that resolves to nothing. Guarded on the OFF→ON transition only, so
+        // a tenant already in that state can still save unrelated fields.
+        var enablingUpi = request.UpiQrEnabled && !t.UpiQrEnabled;
+        if (enablingUpi && string.IsNullOrWhiteSpace(request.UpiVpa))
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["upiVpa"] = ["Enter your UPI ID to show a payment QR, or keep the QR off."]
+            });
+
+        // Verification is deliberately NOT required here. Razorpay's Validate VPA API was withdrawn
+        // with the NPCI UPI-Collect deprecation (28 Feb 2026), so no automated check can succeed for
+        // any tenant — requiring one would make the QR permanently unreachable. The residual risk is a
+        // mistyped id that happens to be a stranger's real UPI id, which pays the wrong account
+        // silently; the settings screen warns about it and the id is printed beside the QR so the
+        // owner and their customers can read it.
         t.Name = request.Name;
         t.GstNumber = string.IsNullOrWhiteSpace(request.GstNumber) ? null : request.GstNumber;
         t.GstEnabled = request.GstEnabled;
@@ -87,6 +114,21 @@ public class UpdateTenantSettingsCommandHandler : IRequestHandler<UpdateTenantSe
         t.LogoUrl = request.LogoUrl;
         t.PrimaryColor = string.IsNullOrWhiteSpace(request.PrimaryColor) ? null : request.PrimaryColor;
         t.DefaultLanguage = request.DefaultLanguage;
+        var newVpa = string.IsNullOrWhiteSpace(request.UpiVpa) ? null : request.UpiVpa.Trim();
+
+        // A changed id has NOT been checked, whatever the old one's result was. Leaving the tick and
+        // the registered name in place would vouch for an id nobody has verified — the one thing the
+        // verify button exists to prevent.
+        if (!string.Equals(t.UpiVpa, newVpa, StringComparison.OrdinalIgnoreCase))
+        {
+            t.UpiVerifiedAt = null;
+            t.UpiVerifiedName = null;
+        }
+
+        t.UpiVpa = newVpa;
+        t.UpiPayeeName = string.IsNullOrWhiteSpace(request.UpiPayeeName) ? null : request.UpiPayeeName.Trim();
+        // Clearing the id also switches the QR off — never leave the flag on with nothing behind it.
+        t.UpiQrEnabled = request.UpiQrEnabled && t.UpiVpa is not null;
 
         await _db.SaveChangesAsync(ct);
     }

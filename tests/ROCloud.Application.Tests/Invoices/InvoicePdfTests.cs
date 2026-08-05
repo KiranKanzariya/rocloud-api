@@ -1,3 +1,4 @@
+using ROCloud.Application.Common;
 using ROCloud.Application.Features.Invoices.Dtos;
 using ROCloud.Infrastructure.Pdf;
 
@@ -37,6 +38,45 @@ public class InvoicePdfTests
             SubTotal: 400m, CgstAmount: 0m, SgstAmount: 0m, Discount: 0m, TotalAmount: 400m,
             Notes: null,
             IsTaxInvoice: false, Status: "Paid", PaidAmount: 400m, BrandColor: null);
+
+        AssertValidPdf(new InvoicePdfGenerator().Generate(model));
+    }
+
+    [Fact]
+    public void Generate_WithAScanToPayQr_ProducesAValidPdf()
+    {
+        // Exercises the QR path end to end. It matters that this runs in CI: QRCoder's other renderer
+        // needs System.Drawing.Common and throws on Linux, so a wrong choice would pass on a Windows
+        // dev box and fail only in the container.
+        var balance = 708m - 300m;
+        var model = new InvoicePdfModel(
+            "INV-202608-0012",
+            new DateOnly(2026, 8, 2), new DateOnly(2026, 8, 17), null, null,
+            "Dabhi RO Water", null, "Kothariya, Surendranagar",
+            "Kamlesh Parshotam", "9978551402", null,
+            [new InvoicePdfLine("20L Jar (20L)", "2201", 15, 15m, 225m)],
+            SubTotal: 708m, CgstAmount: 0m, SgstAmount: 0m, Discount: 0m, TotalAmount: 708m,
+            Notes: null,
+            IsTaxInvoice: false, Status: "PartiallyPaid", PaidAmount: 300m, BrandColor: null,
+            UpiPayload: UpiPaymentLink.Build("dabhiro@okaxis", "Dabhi RO Water", balance, "INV-202608-0012"),
+            UpiVpa: "dabhiro@okaxis");
+
+        AssertValidPdf(new InvoicePdfGenerator().Generate(model));
+    }
+
+    [Fact]
+    public void Generate_WithNoUpiConfigured_StillProducesAValidPdf()
+    {
+        // The QR block must be entirely optional — most tenants will never set a UPI id.
+        var model = new InvoicePdfModel(
+            "INV-202608-0013",
+            new DateOnly(2026, 8, 2), new DateOnly(2026, 8, 17), null, null,
+            "Dabhi RO Water", null, null,
+            "Kamlesh Parshotam", null, null,
+            [new InvoicePdfLine("20L Jar (20L)", "2201", 1, 15m, 15m)],
+            SubTotal: 15m, CgstAmount: 0m, SgstAmount: 0m, Discount: 0m, TotalAmount: 15m,
+            Notes: null,
+            IsTaxInvoice: false, Status: "Sent", PaidAmount: 0m, BrandColor: null);
 
         AssertValidPdf(new InvoicePdfGenerator().Generate(model));
     }

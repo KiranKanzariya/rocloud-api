@@ -131,6 +131,10 @@ public class InvoicePdfGenerator : IInvoicePdfGenerator
                 }
             });
 
+            // Scan-to-pay, below the totals so the customer reads what they owe first. Draws nothing
+            // when the tenant has no UPI id, has the QR off, or the invoice is settled.
+            UpiQrBlock.Render(col, m.UpiPayload, m.UpiVpa, $"Pay {Money(m.TotalAmount - m.PaidAmount)}");
+
             if (!string.IsNullOrWhiteSpace(m.Notes))
                 col.Item().PaddingTop(12).Text($"Notes: {m.Notes}").FontSize(9).FontColor(Colors.Grey.Darken1);
         });

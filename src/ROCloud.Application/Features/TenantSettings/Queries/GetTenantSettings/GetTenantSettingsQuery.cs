@@ -31,6 +31,7 @@ public class GetTenantSettingsQueryHandler : IRequestHandler<GetTenantSettingsQu
             t.GstNumber, t.GstEnabled, Math.Round(t.GstRate * 100m, 2),
             t.AddressLine, t.City, t.State, t.Pincode,
             t.LogoUrl, t.PrimaryColor, t.DefaultLanguage,
-            _tenant.PlanType, t.Status.ToString());
+            _tenant.PlanType, t.Status.ToString(),
+            t.UpiVpa, t.UpiPayeeName, t.UpiQrEnabled, t.UpiVerifiedAt, t.UpiVerifiedName);
     }
 }

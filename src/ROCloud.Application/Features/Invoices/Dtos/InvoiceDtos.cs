@@ -86,7 +86,12 @@ public sealed record InvoicePdfModel(
     bool IsTaxInvoice,        // GST-registered tenant → "TAX INVOICE" + HSN; else "BILL OF SUPPLY"
     string Status,            // invoice status (Paid / PartiallyPaid / Sent / Overdue / Cancelled …)
     decimal PaidAmount,
-    string? BrandColor);      // tenant's brand hex (#RRGGBB) for accents; null → app navy
+    string? BrandColor,       // tenant's brand hex (#RRGGBB) for accents; null → app navy
+    // Scan-to-pay (§10). Payload is the upi://pay deep link the QR encodes — null when the tenant has
+    // no UPI id, has the QR switched off, or nothing is left to pay. UpiVpa is printed as TEXT beside
+    // the QR so a customer can read where the money goes when the scan fails, or check it before paying.
+    string? UpiPayload = null,
+    string? UpiVpa = null);
 
 public sealed record InvoicePdfLine(
     string Description, string Hsn, int Quantity, decimal Rate, decimal Amount);

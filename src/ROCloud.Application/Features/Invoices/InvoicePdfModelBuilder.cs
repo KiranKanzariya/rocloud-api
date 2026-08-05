@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using ROCloud.Application.Common;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
 using ROCloud.Application.Features.Customers.Commands.SetCustomerOpeningBalance;
@@ -60,7 +61,23 @@ internal static class InvoicePdfModelBuilder
             tenant.GstEnabled,
             invoice.Status.ToString(),
             invoice.PaidAmount,
-            tenant.PrimaryColor);
+            tenant.PrimaryColor,
+            // Ask for what is still OWED, not the total — a part-paid invoice re-downloaded later must
+            // request the balance. Build() returns null once that reaches zero, so a settled or
+            // cancelled invoice carries no QR rather than inviting a second payment.
+            // The owner's explicit opt-in is the whole gate — an id is not required to have been
+            // verified, because no automated check exists any more (see UpdateTenantSettingsCommand).
+            tenant.UpiQrEnabled
+                ? UpiPaymentLink.Build(
+                    tenant.UpiVpa,
+                    tenant.UpiPayeeName ?? tenant.Name,
+                    invoice.TotalAmount - invoice.PaidAmount,
+                    // Invoice number AND customer name: the number alone tells the owner what was
+                    // paid but not by whom without a lookup, and a UPI credit notification is all
+                    // they get to go on.
+                    UpiPaymentLink.Reference(invoice.InvoiceNumber, customer.Name))
+                : null,
+            tenant.UpiQrEnabled ? tenant.UpiVpa : null);
     }
 
     /// <summary>Strips internal note markers (e.g. the opening-balance tag) so they never leak onto the

@@ -24,6 +24,7 @@ public class ReconcilePaymentsTests
         public Task<RazorpayPaymentStatus> GetOrderPaymentStatusAsync(string orderId, CancellationToken ct = default)
             => Task.FromResult(Statuses.TryGetValue(orderId, out var s) ? s : new RazorpayPaymentStatus(false, null));
         public bool VerifyWebhookSignature(string rawBody, string? signature) => true;
+        public Task<RazorpayVpaValidation> ValidateVpaAsync(string vpa, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<string> CreateSubscriptionAsync(string planId, string customerId, CancellationToken ct = default) => throw new NotSupportedException();
         public Task CancelSubscriptionAsync(string subscriptionId, CancellationToken ct = default) => Task.CompletedTask;
     }

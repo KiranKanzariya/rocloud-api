@@ -27,6 +27,15 @@ public sealed class FakeRazorpayService : IRazorpayService
     public Task<RazorpayPaymentStatus> GetOrderPaymentStatusAsync(string orderId, CancellationToken ct = default)
         => Task.FromResult(PaidStatuses.TryGetValue(orderId, out var s) ? s : new RazorpayPaymentStatus(false, null));
 
+    /// <summary>VPA → result for ValidateVpaAsync. An id not listed comes back Unavailable, matching
+    /// the real service's behaviour when it cannot reach Razorpay or has no credentials.</summary>
+    public Dictionary<string, RazorpayVpaValidation> VpaResults { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public Task<RazorpayVpaValidation> ValidateVpaAsync(string vpa, CancellationToken ct = default)
+        => Task.FromResult(VpaResults.TryGetValue(vpa, out var r)
+            ? r
+            : new RazorpayVpaValidation(false, null, Unavailable: true));
+
     public bool VerifyWebhookSignature(string rawBody, string? signature) => true;
     public Task<string> CreateSubscriptionAsync(string planId, string customerId, CancellationToken ct = default) => Task.FromResult("sub_test");
     public Task CancelSubscriptionAsync(string subscriptionId, CancellationToken ct = default) => Task.CompletedTask;

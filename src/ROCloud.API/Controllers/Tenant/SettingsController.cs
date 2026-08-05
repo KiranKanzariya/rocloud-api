@@ -5,6 +5,7 @@ using ROCloud.API.Filters;
 using ROCloud.Application.Common.Models;
 using ROCloud.Application.Common.Settings;
 using ROCloud.Application.Features.TenantSettings.Commands.UpdateTenantSettings;
+using ROCloud.Application.Features.TenantSettings.Commands.VerifyUpiVpa;
 using ROCloud.Application.Features.TenantSettings.Dtos;
 using ROCloud.Application.Features.TenantSettings.Queries.GetBillingSettings;
 using ROCloud.Application.Features.TenantSettings.Queries.GetTenantSettings;
@@ -60,4 +61,14 @@ public class SettingsController : ControllerBase
         await _mediator.Send(command, ct);
         return Ok(ApiResponse<object>.Ok(new { updated = true }));
     }
+
+    /// <summary>
+    /// Checks a UPI id against the payments network and returns the name it is registered to, so the
+    /// owner can confirm it is their own account before a QR goes onto customer invoices. POST, not
+    /// GET: it records the result against the tenant when the id checks out.
+    /// </summary>
+    [HttpPost("verify-upi")]
+    [RequirePermission("BusinessProfile.Manage")]
+    public async Task<IActionResult> VerifyUpi([FromBody] VerifyUpiVpaCommand command, CancellationToken ct)
+        => Ok(ApiResponse<UpiVerificationDto>.Ok(await _mediator.Send(command, ct)));
 }

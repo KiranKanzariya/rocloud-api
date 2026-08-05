@@ -50,6 +50,33 @@ public class Tenant : BaseEntity
     public string? State { get; set; }
     public string? Pincode { get; set; }
 
+    /// <summary>
+    /// The owner's UPI id (VPA, e.g. "shop@okaxis") used to draw a scan-to-pay QR on customer invoices
+    /// and statements. DB: tenants.upi_vpa.
+    ///
+    /// Money paid through it goes STRAIGHT to this id — ROCloud never sees it and cannot reconcile it,
+    /// so the owner still records the payment by hand. Nothing here can verify the id is real or that it
+    /// belongs to this tenant, which is why the QR is opt-in (<see cref="UpiQrEnabled"/>), the id is
+    /// printed as text beside the QR for the customer to check, and the settings screen warns about it.
+    /// </summary>
+    public string? UpiVpa { get; set; }
+
+    /// <summary>Name the payer sees in their UPI app. Falls back to the business name when unset.</summary>
+    public string? UpiPayeeName { get; set; }
+
+    /// <summary>Opt-in for the scan-to-pay QR. Cannot be turned on without a <see cref="UpiVpa"/>.</summary>
+    public bool UpiQrEnabled { get; set; }
+
+    /// <summary>
+    /// When the current <see cref="UpiVpa"/> was last confirmed to exist against the payments network,
+    /// and the account name it came back registered to. Both are CLEARED whenever the id changes, so a
+    /// green tick can never be left standing next to an id nobody has checked.
+    /// </summary>
+    public DateTime? UpiVerifiedAt { get; set; }
+
+    /// <summary>The registered account name returned by the check — the owner confirms it is theirs.</summary>
+    public string? UpiVerifiedName { get; set; }
+
     /// <summary>Tenant default language (§4c.3). DB: tenants.default_language.</summary>
     public string DefaultLanguage { get; set; } = "en";
 

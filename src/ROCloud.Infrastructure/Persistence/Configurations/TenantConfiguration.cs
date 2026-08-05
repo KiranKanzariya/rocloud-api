@@ -29,6 +29,9 @@ public class TenantConfiguration : IEntityTypeConfiguration<Tenant>
         b.Property(t => t.City).HasMaxLength(100);
         b.Property(t => t.State).HasMaxLength(100);
         b.Property(t => t.Pincode).HasMaxLength(10);
+        b.Property(t => t.UpiVpa).HasMaxLength(100);
+        b.Property(t => t.UpiPayeeName).HasMaxLength(100);
+        b.Property(t => t.UpiVerifiedName).HasMaxLength(200);
         b.Property(t => t.DefaultLanguage).HasMaxLength(5);
         b.Property(t => t.SubscriptionDiscountType).HasConversion<string>().HasMaxLength(20);
         b.Property(t => t.SubscriptionDiscountValue).HasPrecision(10, 2);

@@ -100,6 +100,56 @@ public class RazorpayService : IRazorpayService
         return new RazorpayOrder(orderId, amount, Currency, KeyId);
     }
 
+    /// <summary>
+    /// Razorpay's VPA validation (POST payments/validate/vpa): confirms a UPI id exists and returns
+    /// the name it is registered to.
+    ///
+    /// <para>Everything that is not a clear "this id does not exist" comes back as
+    /// <c>Unavailable</c> — missing credentials, a network failure, or the endpoint not being enabled
+    /// on the merchant account (it is not on by default for every Razorpay account). Reporting those
+    /// as "invalid" would tell an owner their working UPI id is broken and stop them enabling a
+    /// feature that would have worked perfectly.</para>
+    /// </summary>
+    public async Task<RazorpayVpaValidation> ValidateVpaAsync(string vpa, CancellationToken ct = default)
+    {
+        if (!IsConfigured || string.IsNullOrWhiteSpace(vpa))
+            return new RazorpayVpaValidation(false, null, Unavailable: true);
+
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl}payments/validate/vpa")
+            {
+                Content = JsonContent.Create(new { vpa = vpa.Trim() })
+            };
+            req.Headers.Authorization = new AuthenticationHeaderValue(
+                "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{KeyId}:{KeySecret}")));
+
+            using var resp = await _http.SendAsync(req, ct);
+            var body = await resp.Content.ReadAsStringAsync(ct);
+
+            if (resp.IsSuccessStatusCode)
+            {
+                using var ok = JsonDocument.Parse(body);
+                var success = ok.RootElement.TryGetProperty("success", out var s) && s.ValueKind == JsonValueKind.True;
+                return new RazorpayVpaValidation(success, success ? Str(ok.RootElement, "customer_name") : null);
+            }
+
+            // A 400 is only a verdict on the id when Razorpay's error actually names the address —
+            // see IsVerdictOnTheVpa. Everything else (including a 400 meaning "this endpoint is not
+            // enabled on your account") is "could not check".
+            if (resp.StatusCode == System.Net.HttpStatusCode.BadRequest && IsVerdictOnTheVpa(body))
+                return new RazorpayVpaValidation(false, null);
+
+            _logger.LogWarning("Razorpay VPA validation unavailable ({Status}): {Body}", resp.StatusCode, body);
+            return new RazorpayVpaValidation(false, null, Unavailable: true);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Razorpay VPA validation failed for {Vpa}", vpa);
+            return new RazorpayVpaValidation(false, null, Unavailable: true);
+        }
+    }
+
     // NOTE: live Razorpay call — verify against test keys before relying on it in production.
     public async Task<RazorpayPaymentStatus> GetOrderPaymentStatusAsync(string orderId, CancellationToken ct = default)
     {
@@ -151,13 +201,37 @@ public class RazorpayService : IRazorpayService
     /// holds anything beyond what Razorpay already exposes (last four digits at most — §10.18).
     /// Returns null when the payload doesn't carry the expected detail, which the UI renders as bare method.
     /// </summary>
+    /// <summary>A non-empty string property, or null. Razorpay omits or nulls fields freely.</summary>
+    /// <summary>
+    /// Razorpay answers 400 for two unrelated things: "that id is not valid", and "this endpoint is not
+    /// enabled on your account" — the latter as <c>"The requested URL was not found on the server."</c>
+    /// Only the first is a verdict on the owner's UPI id. Telling an owner their working id is invalid
+    /// because our account lacks an entitlement would talk them out of a setup that is perfectly fine,
+    /// so a 400 counts as a negative only when the error names the address itself.
+    /// </summary>
+    private static bool IsVerdictOnTheVpa(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (!doc.RootElement.TryGetProperty("error", out var err)) return false;
+            if (Str(err, "description") is not { } description) return false;
+            return description.Contains("vpa", StringComparison.OrdinalIgnoreCase)
+                || description.Contains("payment address", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (JsonException)
+        {
+            return false;   // an unparseable body proves nothing about the id
+        }
+    }
+
+    private static string? Str(JsonElement el, string prop) =>
+        el.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String
+            ? v.GetString() is { Length: > 0 } s ? s : null
+            : null;
+
     private static string? DescribeInstrument(JsonElement payment, string? method)
     {
-        static string? Str(JsonElement el, string prop) =>
-            el.TryGetProperty(prop, out var v) && v.ValueKind == JsonValueKind.String
-                ? v.GetString() is { Length: > 0 } s ? s : null
-                : null;
-
         switch (method?.ToLowerInvariant())
         {
             case "card":

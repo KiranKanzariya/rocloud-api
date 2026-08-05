@@ -8,6 +8,7 @@ using ROCloud.Application.Features.Payments.Commands.CollectPayment;
 using ROCloud.Application.Features.Payments.Commands.ConfirmRazorpayPayment;
 using ROCloud.Application.Features.Payments.Commands.InitiateRazorpayPayment;
 using ROCloud.Application.Features.Payments.Dtos;
+using ROCloud.Application.Features.Payments.Queries.GetCustomerUpiQr;
 using ROCloud.Application.Features.Payments.Queries.GetOutstandingDues;
 using ROCloud.Application.Features.Payments.Queries.GetPaymentSummary;
 using ROCloud.Application.Features.Payments.Queries.GetPayments;
@@ -38,9 +39,29 @@ public class PaymentsController : ControllerBase
 
     [HttpGet("outstanding")]
     [RequirePermission("Payments.View")]
-    public async Task<IActionResult> GetOutstanding([FromQuery] int overdueDays, CancellationToken ct)
+    /// <param name="overdueDays">
+    /// How aged a debt must be to be listed. Omitted → 7, the dunning default. Pass 0 for EVERYONE who
+    /// owes as of today — what the money-in worklist needs, since a customer who just paid by UPI QR
+    /// may owe on a delivery made this morning. Nullable on purpose: an omitted query parameter binds
+    /// to 0, so the old `<= 0 ? 7` could never tell "not specified" from "no ageing filter, please".
+    /// </param>
+    public async Task<IActionResult> GetOutstanding([FromQuery] int? overdueDays, CancellationToken ct)
         => Ok(ApiResponse<IReadOnlyList<OutstandingDueDto>>.Ok(
-            await _mediator.Send(new GetOutstandingDuesQuery(overdueDays <= 0 ? 7 : overdueDays), ct)));
+            await _mediator.Send(new GetOutstandingDuesQuery(overdueDays ?? 7), ct)));
+
+    /// <summary>
+    /// Scan-to-pay payload for what this customer owes now — the counter QR.
+    ///
+    /// Payments.View, not .Collect: this is a read, and gating a GET behind a write permission is
+    /// exactly what ReadEndpointPermissionTests forbids. It withholds nothing either — the same UPI id
+    /// is printed on every invoice PDF and sits in Business profile. The money-in list still shows the
+    /// button only to users who can collect, which is a workflow choice, not an access one.
+    /// </summary>
+    [HttpGet("customers/{customerId:guid}/upi-qr")]
+    [RequirePermission("Payments.View")]
+    public async Task<IActionResult> GetCustomerUpiQr(Guid customerId, CancellationToken ct)
+        => Ok(ApiResponse<CustomerUpiQrDto>.Ok(
+            await _mediator.Send(new GetCustomerUpiQrQuery(customerId), ct)));
 
     [HttpPost]
     [RequirePermission("Payments.Collect")]

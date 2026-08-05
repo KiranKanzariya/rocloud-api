@@ -59,6 +59,22 @@ public sealed record OutstandingDueDto(
     string? CustomerLanguage = null,
     string? CustomerEmail = null);
 
+/// <summary>
+/// Scan-to-pay for a customer's CURRENT balance, shown on screen at the counter (guide §10).
+/// </summary>
+/// <param name="Payload">
+/// The upi://pay deep link to draw as a QR. Null when there is nothing to show — the tenant has not
+/// set up scan-to-pay, or this customer owes nothing. <paramref name="Configured"/> separates those
+/// two, so the UI can point at settings instead of showing an empty box.
+/// </param>
+public sealed record CustomerUpiQrDto(
+    Guid CustomerId,
+    string CustomerName,
+    decimal Balance,
+    string? Payload,
+    string? Vpa,
+    bool Configured);
+
 /// <summary>Checkout parameters returned to the Angular client to open Razorpay.</summary>
 public sealed record RazorpayInitiateResultDto(
     Guid PaymentId, string KeyId, string OrderId, long AmountPaise, string Currency);
