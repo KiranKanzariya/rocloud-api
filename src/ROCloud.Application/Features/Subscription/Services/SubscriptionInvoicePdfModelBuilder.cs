@@ -23,6 +23,10 @@ public static class SubscriptionInvoicePdfModelBuilder
             invoice.PlanType, invoice.BillingCycle,
             invoice.Description ?? $"{invoice.PlanType} plan",
             invoice.GrossAmount, invoice.DiscountAmount, invoice.Amount,
-            paid, tenant.Name, tenant.GstNumber);
+            paid, tenant.Name, tenant.GstNumber,
+            // Read from the row, not from `paid` — this PDF is re-rendered on every download, so an
+            // invoice cancelled after it was emailed must print CANCELLED the next time it is opened.
+            invoice.Status == SubscriptionInvoiceStatus.Cancelled,
+            invoice.CancellationReason);
     }
 }

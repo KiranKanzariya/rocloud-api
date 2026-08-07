@@ -3,6 +3,7 @@ using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
+using ROCloud.Application.Features.Subscription.Services;
 using ROCloud.Domain.Enums;
 
 namespace ROCloud.Application.Features.Platform.Tenants.Commands.GrantFreeMonths;
@@ -42,6 +43,13 @@ public class GrantFreeMonthsCommandHandler : IRequestHandler<GrantFreeMonthsComm
         tenant.SubscriptionEndsAt = basis.AddMonths(request.Months);
         tenant.Status = TenantStatus.Active;
         tenant.TrialEndsAt = null;
+
+        // The gift moved the term, so any open renewal invoice now bills a period the tenant has just
+        // been given free. Worse, leaving it open would stop the renewal job raising the NEXT invoice
+        // when the gifted months run out — the tenant would lapse having never been billed for it.
+        var months = request.Months == 1 ? "1 free month" : $"{request.Months} free months";
+        await OpenSubscriptionInvoices.CancelAsync(
+            _db, tenant.Id, $"{months} granted by ROCloud, covering this period. Nothing to pay.", ct);
 
         await _db.SaveChangesAsync(ct);
         return tenant.SubscriptionEndsAt.Value;

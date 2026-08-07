@@ -58,7 +58,10 @@ public sealed record SubscriptionInvoiceDto(
     /// <summary>How it was paid: card | upi | netbanking | wallet.</summary>
     string? PaymentMethod = null,
     /// <summary>Display detail for the method — UPI id, "Visa •••• 4366", bank, or wallet.</summary>
-    string? PaymentInstrument = null);
+    string? PaymentInstrument = null,
+    /// <summary>Why a Cancelled invoice was withdrawn — shown beneath it in the billing list, so the
+    /// owner is never left comparing an emailed bill against a cancellation with no explanation.</summary>
+    string? CancellationReason = null);
 
 /// <summary>Usage counts vs the plan's limits.</summary>
 public sealed record UsageDto(

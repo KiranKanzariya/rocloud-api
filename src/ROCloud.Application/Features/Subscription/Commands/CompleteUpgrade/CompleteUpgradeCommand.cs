@@ -104,7 +104,9 @@ public class CompleteUpgradeCommandHandler : IRequestHandler<CompleteUpgradeComm
         if (change.Kind == PlanChangeKind.Downgrade)
         {
             tenant.ScheduledPlanId = plan.Id;
-            await VoidOpenRenewalInvoicesAsync(tenant.Id, ct);
+            await CancelOpenRenewalInvoicesAsync(tenant.Id,
+                $"You switched to the {plan.Name} plan from your next renewal. A new invoice will be raised at the {plan.Name} price.",
+                ct);
             await _db.SaveChangesAsync(ct);
             return;
         }
@@ -185,7 +187,11 @@ public class CompleteUpgradeCommandHandler : IRequestHandler<CompleteUpgradeComm
         // Supersede any open Pending renewal invoice. For a new term it would double-bill the period we
         // just covered; for a mid-cycle change it is priced at the plan they have just left. Either way
         // the daily renewal job re-raises a correct one at lead time.
-        await VoidOpenRenewalInvoicesAsync(tenant.Id, ct);
+        await CancelOpenRenewalInvoicesAsync(tenant.Id,
+            change.Kind == PlanChangeKind.NewTerm
+                ? $"Replaced by your {plan.Name} plan payment — this period is now covered."
+                : $"Replaced when you upgraded to the {plan.Name} plan.",
+            ct);
 
         // The Paid invoice for the owner's billing history. A new term is the full plan price for one
         // cycle (Option A); a mid-cycle upgrade is the prorated DIFFERENCE for the days remaining.
@@ -224,17 +230,8 @@ public class CompleteUpgradeCommandHandler : IRequestHandler<CompleteUpgradeComm
         await _db.SaveChangesAsync(ct);
     }
 
-    /// <summary>
-    /// Voids the tenant's open Pending renewal invoices. Called whenever the plan or the term changes
-    /// underneath them: a stale Pending invoice either double-bills a period now covered, or quotes the
-    /// price of a plan the tenant no longer has. SubscriptionExpiryJob re-raises a correct one.
-    /// </summary>
-    private async Task VoidOpenRenewalInvoicesAsync(Guid tenantId, CancellationToken ct)
-    {
-        var open = await _db.SubscriptionInvoices
-            .Where(i => i.TenantId == tenantId && i.Status == SubscriptionInvoiceStatus.Pending)
-            .ToListAsync(ct);
-        foreach (var invoice in open)
-            invoice.Status = SubscriptionInvoiceStatus.Void;
-    }
+    /// <summary>See <see cref="OpenSubscriptionInvoices"/> — the same rule the platform-admin gift and
+    /// plan-override commands apply.</summary>
+    private Task CancelOpenRenewalInvoicesAsync(Guid tenantId, string reason, CancellationToken ct) =>
+        OpenSubscriptionInvoices.CancelAsync(_db, tenantId, reason, ct);
 }

@@ -102,5 +102,6 @@ public class RenewSubscriptionCommandHandler : IRequestHandler<RenewSubscription
     private static SubscriptionInvoiceDto Map(Domain.Entities.Platform.SubscriptionInvoice i) => new(
         i.Id, i.InvoiceNumber, i.PlanType, i.BillingCycle,
         i.PeriodStart, i.PeriodEnd, i.GrossAmount, i.DiscountAmount, i.Amount,
-        i.Status, i.DueDate, i.Description, i.PaidAt);
+        i.Status, i.DueDate, i.Description, i.PaidAt,
+        CancellationReason: i.CancellationReason);
 }

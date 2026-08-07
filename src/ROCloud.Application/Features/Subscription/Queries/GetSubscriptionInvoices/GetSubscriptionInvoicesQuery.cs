@@ -30,7 +30,10 @@ public class GetSubscriptionInvoicesQueryHandler
             .Select(i => new SubscriptionInvoiceDto(
                 i.Id, i.InvoiceNumber, i.PlanType, i.BillingCycle,
                 i.PeriodStart, i.PeriodEnd, i.GrossAmount, i.DiscountAmount, i.Amount,
-                i.Status, i.DueDate, i.Description, i.PaidAt))
+                i.Status, i.DueDate, i.Description, i.PaidAt,
+                // Positional: an expression tree cannot take out-of-position named arguments, so the
+                // list-only nulls are spelled out to reach CancellationReason.
+                null, null, null, null, null, i.CancellationReason))
             .ToListAsync(ct);
     }
 }

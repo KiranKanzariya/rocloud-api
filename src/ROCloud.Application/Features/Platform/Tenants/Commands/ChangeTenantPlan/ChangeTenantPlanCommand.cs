@@ -40,6 +40,15 @@ public class ChangeTenantPlanCommandHandler : IRequestHandler<ChangeTenantPlanCo
         await Subscription.PlanChangeGuard.EnsureUsageFitsAsync(_db, tenant.Id, plan, ct);
 
         tenant.PlanId = plan.Id;
+
+        // An open renewal invoice quotes the plan the tenant had a moment ago. Cancelling it lets the
+        // renewal job re-raise one at the new plan's price; leaving it would both bill the wrong amount
+        // and block that correct invoice from ever being raised.
+        await Subscription.Services.OpenSubscriptionInvoices.CancelAsync(
+            _db, tenant.Id,
+            $"Your plan was changed to {plan.Name} by ROCloud. A new invoice will be raised at the {plan.Name} price.",
+            ct);
+
         await _db.SaveChangesAsync(ct);
     }
 }

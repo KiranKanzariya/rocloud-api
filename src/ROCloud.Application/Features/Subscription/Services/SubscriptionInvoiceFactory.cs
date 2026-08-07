@@ -9,7 +9,10 @@ public static class SubscriptionInvoiceStatus
 {
     public const string Pending = "Pending";
     public const string Paid = "Paid";
-    public const string Void = "Void";
+
+    /// <summary>Withdrawn because the tenant's term or plan moved underneath it. Always carries a
+    /// <c>CancellationReason</c>. Was "Void" before migration-AddSubscriptionInvoiceCancellation.</summary>
+    public const string Cancelled = "Cancelled";
 }
 
 /// <summary>

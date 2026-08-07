@@ -42,7 +42,19 @@ public class PayInvoiceCompleteCommandHandler : IRequestHandler<PayInvoiceComple
             .FirstOrDefaultAsync(i => i.Id == request.InvoiceId && i.TenantId == _tenant.TenantId, ct)
             ?? throw new NotFoundException("SubscriptionInvoice", request.InvoiceId);
 
-        if (invoice.Status != SubscriptionInvoiceStatus.Pending)
+        // Cancelled is accepted here, deliberately. The owner can be on the Razorpay screen when
+        // something cancels this invoice underneath them — an admin gift, a plan change, their own
+        // upgrade in another tab. Razorpay still captures the money. Refusing it then would take the
+        // charge and hand back nothing, leaving a manual refund as the only remedy. A VERIFIED payment
+        // is honoured whatever became of the invoice meanwhile; the unverified case is rejected below.
+        if (invoice.Status == SubscriptionInvoiceStatus.Paid)
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["invoice"] = ["This invoice is already paid."]
+            });
+
+        if (invoice.Status != SubscriptionInvoiceStatus.Pending
+            && invoice.Status != SubscriptionInvoiceStatus.Cancelled)
             throw new ValidationException(new Dictionary<string, string[]>
             {
                 ["invoice"] = ["This invoice is not open for payment."]
@@ -73,12 +85,23 @@ public class PayInvoiceCompleteCommandHandler : IRequestHandler<PayInvoiceComple
             paymentInstrument = status.Instrument;
         }
 
+        // A cancelled invoice is only honoured on the strength of a real captured payment. Without one
+        // there is no money to protect, and paying it would resurrect a bill the platform has already
+        // withdrawn — including, in dev, where verification is skipped entirely.
+        if (invoice.Status == SubscriptionInvoiceStatus.Cancelled && paymentId is null)
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["invoice"] = ["This invoice was cancelled. Please refresh and pay the current invoice."]
+            });
+
         var tenant = await _db.Tenants.IgnoreQueryFilters()
             .FirstOrDefaultAsync(t => t.Id == invoice.TenantId, ct)
             ?? throw new NotFoundException("Tenant", invoice.TenantId);
 
-        // Mark the invoice paid.
+        // Mark the invoice paid. Any cancellation reason goes with it — the cancellation did not hold,
+        // and a PAID invoice explaining why it was withdrawn is a contradiction on the owner's document.
         invoice.Status = SubscriptionInvoiceStatus.Paid;
+        invoice.CancellationReason = null;
         invoice.PaidAt = DateTime.UtcNow;
         invoice.RazorpayOrderId = request.OrderId ?? invoice.RazorpayOrderId;
         invoice.RazorpayPaymentId = paymentId;

@@ -40,6 +40,6 @@ public class GetSubscriptionInvoiceByIdQueryHandler : IRequestHandler<GetSubscri
             i.PeriodStart, i.PeriodEnd, i.GrossAmount, i.DiscountAmount, i.Amount,
             i.Status, i.DueDate, i.Description, i.PaidAt,
             i.RazorpayOrderId, i.RazorpayPaymentId, t,
-            i.PaymentMethod, i.PaymentInstrument);
+            i.PaymentMethod, i.PaymentInstrument, i.CancellationReason);
     }
 }

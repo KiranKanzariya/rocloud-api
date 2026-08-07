@@ -9,13 +9,14 @@ public class SubscriptionInvoiceConfiguration : IEntityTypeConfiguration<Subscri
     public void Configure(EntityTypeBuilder<SubscriptionInvoice> b)
     {
         b.ToTable("subscription_invoices");
-        b.Ignore(t => t.IsDeleted);   // no is_deleted column — we use the Void status instead
+        b.Ignore(t => t.IsDeleted);   // no is_deleted column — we use the Cancelled status instead
 
         b.Property(t => t.InvoiceNumber).HasMaxLength(30).IsRequired();
         b.Property(t => t.PlanType).HasMaxLength(20);
         b.Property(t => t.BillingCycle).HasMaxLength(10);
         b.Property(t => t.Status).HasMaxLength(20);
         b.Property(t => t.Description).HasMaxLength(200);
+        b.Property(t => t.CancellationReason).HasMaxLength(300);
         b.Property(t => t.RazorpayOrderId).HasMaxLength(100);
         b.Property(t => t.RazorpayPaymentId).HasMaxLength(100);
         b.Property(t => t.PaymentMethod).HasMaxLength(20);

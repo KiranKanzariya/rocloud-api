@@ -181,7 +181,7 @@ public class PlanChangeCompletionTests
 
         await Handler(db, ctx).Handle(new CompleteUpgradeCommand("Pro", "Monthly"), CancellationToken.None);
 
-        var voided = await db.SubscriptionInvoices.FirstAsync(i => i.Id == stale.Id);
-        Assert.Equal(SubscriptionInvoiceStatus.Void, voided.Status);
+        var cancelled = await db.SubscriptionInvoices.FirstAsync(i => i.Id == stale.Id);
+        Assert.Equal(SubscriptionInvoiceStatus.Cancelled, cancelled.Status);
     }
 }

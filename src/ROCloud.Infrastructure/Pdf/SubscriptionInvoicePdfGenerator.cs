@@ -68,8 +68,16 @@ public class SubscriptionInvoicePdfGenerator : ISubscriptionInvoicePdfGenerator
                     var lastDay = m.PeriodEnd > m.PeriodStart ? m.PeriodEnd.AddDays(-1) : m.PeriodStart;
                     right.Item().AlignRight().Text($"Period: {m.PeriodStart:dd MMM} – {lastDay:dd MMM yyyy}").FontSize(9);
 
-                    right.Item().AlignRight().PaddingTop(3).Text(m.Paid ? "PAID" : "PAYMENT DUE")
-                        .Bold().FontColor(m.Paid ? ColTeal : ColAmber);
+                    // Cancelled outranks paid/due: this document was emailed as a bill, so the owner
+                    // reading it later must see at a glance that it is no longer owed. "PAYMENT DUE"
+                    // on a withdrawn invoice is the one thing that would cost them money.
+                    var (stamp, stampColour) = m switch
+                    {
+                        { Cancelled: true } => ("CANCELLED", ColDanger),
+                        { Paid: true } => ("PAID", ColTeal),
+                        _ => ("PAYMENT DUE", ColAmber),
+                    };
+                    right.Item().AlignRight().PaddingTop(3).Text(stamp).Bold().FontColor(stampColour);
                 });
             });
             col.Item().PaddingTop(6).LineHorizontal(1).LineColor(Colors.Grey.Lighten1);
@@ -80,6 +88,22 @@ public class SubscriptionInvoicePdfGenerator : ISubscriptionInvoicePdfGenerator
     {
         container.PaddingVertical(10).Column(col =>
         {
+            // The explanation sits ABOVE the amounts, not in a footnote. An owner who opens this after
+            // paying attention to the total needs to know the total no longer applies before they read
+            // it — and the reason is what stops a cancelled bill looking like a billing fault.
+            if (m.Cancelled)
+            {
+                col.Item().PaddingBottom(10).Background(Colors.Grey.Lighten4)
+                    .Border(1).BorderColor(ColDanger).Padding(8).Column(note =>
+                    {
+                        note.Item().Text("This invoice has been cancelled. No payment is required.")
+                            .Bold().FontColor(ColDanger).FontSize(10);
+                        if (!string.IsNullOrWhiteSpace(m.CancellationReason))
+                            note.Item().PaddingTop(2).Text(m.CancellationReason)
+                                .FontSize(9).FontColor(Colors.Grey.Darken2);
+                    });
+            }
+
             col.Item().Text("Bill To").FontSize(9).FontColor(Colors.Grey.Darken1);
             col.Item().Text(m.TenantName).Bold();
             if (!string.IsNullOrWhiteSpace(m.TenantGstin))
@@ -138,6 +162,7 @@ public class SubscriptionInvoicePdfGenerator : ISubscriptionInvoicePdfGenerator
     private const string ColNavy = "#0C447C";
     private const string ColTeal = "#1D9E75";
     private const string ColAmber = "#EF9F27";
+    private const string ColDanger = "#C0392B";
 
     // The canonical ROCloud brand mark (matches roc-logo in the portals) — rendered inline as SVG.
     private const string RocloudLogoSvg =

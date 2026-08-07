@@ -76,7 +76,7 @@ public class SubscriptionInvoiceTests
             .Handle(new CompleteUpgradeCommand("Pro", "Monthly"), CancellationToken.None);
 
         var invoices = await db.SubscriptionInvoices.Where(i => i.TenantId == ctx.TenantId).ToListAsync();
-        Assert.Contains(invoices, i => i.InvoiceNumber == "SEED-1" && i.Status == SubscriptionInvoiceStatus.Void);
+        Assert.Contains(invoices, i => i.InvoiceNumber == "SEED-1" && i.Status == SubscriptionInvoiceStatus.Cancelled);
         Assert.Contains(invoices, i => i.Status == SubscriptionInvoiceStatus.Paid && i.PaidAt != null);
     }
 
