@@ -5,6 +5,7 @@ using ROCloud.API.Filters;
 using ROCloud.Application.Common.Interfaces;
 using ROCloud.Application.Common.Models;
 using ROCloud.Application.Features.Deliveries.Commands.SetDeliveryProof;
+using ROCloud.Application.Features.Deliveries.Commands.StartRoute;
 using ROCloud.Application.Features.Deliveries.Commands.UpdateDeliveryStatus;
 using ROCloud.Application.Features.Deliveries.Dtos;
 using ROCloud.Application.Features.Deliveries.Queries.GetDeliveries;
@@ -62,6 +63,16 @@ public class DeliveriesController : ControllerBase
     public async Task<IActionResult> GetMyRoute([FromQuery] DeliveryFilterDto filter, CancellationToken ct)
         => Ok(ApiResponse<IReadOnlyList<DeliveryListItemDto>>.Ok(
             await _mediator.Send(new GetMyRouteQuery(filter), ct)));
+
+    /// <summary>
+    /// Marks the caller's whole day In Transit — "I have left the plant". One tap for the route,
+    /// replacing one per stop; the status is for the owner's board, not the delivery boy.
+    /// Returns how many stops moved, so a route of plant-pickups reports 0 rather than pretending.
+    /// </summary>
+    [HttpPatch("my-route/start")]
+    [RequirePermission("Deliveries.Update")]
+    public async Task<IActionResult> StartRoute([FromQuery] DateOnly? date, CancellationToken ct)
+        => Ok(ApiResponse<object>.Ok(new { started = await _mediator.Send(new StartRouteCommand(date), ct) }));
 
     /// <summary>
     /// What was recorded at a completed stop — for the read-only delivery summary. A delivery boy holds
