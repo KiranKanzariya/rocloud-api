@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.Extensions.Configuration;
 using ROCloud.Application.Features.Auth.Commands.FindWorkspace;
 using ROCloud.Application.Features.Auth.Commands.ForgotPassword;
@@ -24,6 +25,14 @@ public class AuthController : ControllerBase
 {
     private const string RefreshCookie = "refresh_token";
     private const string RefreshPath = "/api/auth/refresh";
+
+    /// <summary>
+    /// Opt-in marker for clients that have no cookie jar. Sent as <c>X-Client: mobile</c> by the
+    /// Flutter app; browsers never send it, so the web keeps the HttpOnly cookie unchanged.
+    /// </summary>
+    private const string ClientHeader = "X-Client";
+    private const string NativeClient = "mobile";
+
     private static readonly string[] ReservedHostLabels = { "localhost", "api", "admin", "www" };
 
     private readonly IMediator _mediator;
@@ -91,11 +100,21 @@ public class AuthController : ControllerBase
         return AuthOk(result);
     }
 
+    /// <summary>
+    /// Rotates the refresh token. The web sends it as an HttpOnly cookie; a native client has no
+    /// cookie jar, so it may post the token in the body instead. The cookie is preferred when both
+    /// are present — a browser's own cookie should never be overridable by request content.
+    /// </summary>
     [HttpPost("refresh")]
     [AllowAnonymous]
-    public async Task<IActionResult> Refresh(CancellationToken ct)
+    public async Task<IActionResult> Refresh(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] RefreshRequest? body,
+        CancellationToken ct)
     {
         var token = Request.Cookies[RefreshCookie];
+        if (string.IsNullOrEmpty(token))
+            token = body?.RefreshToken;
+
         if (string.IsNullOrEmpty(token))
             return Unauthorized(new { error = "No refresh token.", code = "NO_REFRESH_TOKEN" });
 
@@ -144,11 +163,41 @@ public class AuthController : ControllerBase
     }
 
     // ─── helpers ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The single funnel every token-issuing endpoint returns through.
+    /// <para>
+    /// Web clients keep the existing behaviour exactly: refresh token in an HttpOnly, Secure,
+    /// SameSite=Strict cookie scoped to the refresh path, and never in the body — that is what
+    /// keeps XSS on the portal from being able to read it.
+    /// </para>
+    /// <para>
+    /// A native client (<c>X-Client: mobile</c>) cannot read a cookie at all, so it gets the token
+    /// in the body and no cookie is set. The trade is real but unavoidable for a native app; the
+    /// token lands in the Android Keystore, which no other app on the device can read.
+    /// </para>
+    /// </summary>
     private IActionResult AuthOk(AuthResult result)
     {
+        if (IsNativeClient())
+        {
+            return Ok(new
+            {
+                accessToken = result.AccessToken,
+                expiresAt = result.ExpiresAtUtc,
+                refreshToken = result.RefreshToken
+            });
+        }
+
         SetRefreshCookie(result.RefreshToken);
         return Ok(new { accessToken = result.AccessToken, expiresAt = result.ExpiresAtUtc });
     }
+
+    private bool IsNativeClient() =>
+        string.Equals(
+            Request.Headers[ClientHeader].FirstOrDefault(),
+            NativeClient,
+            StringComparison.OrdinalIgnoreCase);
 
     private void SetRefreshCookie(string refreshToken) =>
         Response.Cookies.Append(RefreshCookie, refreshToken, new CookieOptions
@@ -196,3 +245,6 @@ public sealed record GoogleHandoffRequest(string Grant);
 public sealed record ForgotPasswordRequest(string Email);
 public sealed record ResetPasswordRequest(string Token, string NewPassword);
 public sealed record FindWorkspaceRequest(string Email);
+
+/// <summary>Body form of the refresh token, for clients with no cookie jar. Optional.</summary>
+public sealed record RefreshRequest(string? RefreshToken);

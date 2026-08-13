@@ -244,6 +244,16 @@ app.UseSerilogRequestLogging(options =>
         ex is not null || ctx.Response.StatusCode >= 500 ? LogEventLevel.Error
         : IsHealthProbe(ctx.Request.Path) ? LogEventLevel.Verbose
         : LogEventLevel.Information;
+
+    // Which app builds are actually calling us. This is what tells you it is safe to remove an
+    // API shape or raise the supported floor — Play's version distribution lags and only counts
+    // installs, not clients still making requests.
+    options.EnrichDiagnosticContext = (diagnostic, ctx) =>
+    {
+        var appVersion = ctx.Request.Headers[AppVersionGateMiddleware.VersionHeader].FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(appVersion))
+            diagnostic.Set("AppVersion", appVersion);
+    };
 });
 
 // The anonymous probe endpoints mapped below: /health/live, /health/ready, /health/startup and the
@@ -256,6 +266,10 @@ app.UseRequestLocalization(locOptions.Value);
 
 app.UseIpRateLimiting();
 app.UseCors("ROCloudPolicy");
+// Before auth and tenant resolution: an unsupported app build must be turned away regardless of
+// whether it has a valid session. Requests without an X-App-Version header (i.e. both portals)
+// pass straight through.
+app.UseMiddleware<AppVersionGateMiddleware>();
 app.UseMiddleware<AntiCsrfMiddleware>();
 app.UseAuthentication();
 app.UseMiddleware<TenantMiddleware>();                    // after auth — needs tenant_id claim

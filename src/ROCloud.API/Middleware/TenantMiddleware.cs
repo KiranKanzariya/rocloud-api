@@ -21,6 +21,8 @@ public class TenantMiddleware
         "/api/auth/login", "/api/auth/google", "/api/auth/register", "/api/auth/refresh",
         "/api/auth/forgot-password", "/api/auth/reset-password", "/api/auth/find-workspace",
         "/api/health", "/swagger", "/api/files",
+        // Mobile update policy — read before sign-in, so there is no tenant to resolve.
+        "/api/app",
         // Platform (super-admin) endpoints are never tenant-scoped (guide §26).
         "/api/platform"
     };
