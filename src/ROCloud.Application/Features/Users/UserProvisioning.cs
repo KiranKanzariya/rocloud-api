@@ -11,15 +11,19 @@ namespace ROCloud.Application.Features.Users;
 
 /// <summary>
 /// Shared team-member creation used by CreateUser and InviteUser: validates email uniqueness,
-/// role membership, the plan's user limit and the area assignments; generates a temporary
-/// password; and writes the user + its user_areas rows. The caller commits and sends the email.
+/// role membership, the plan's user limit and the area assignments, and writes the user + its
+/// user_areas rows. The caller commits and sends the invitation (see <see cref="UserInvitations"/>).
+///
+/// <para>The account is created PENDING — inactive, with no password anyone knows. It only becomes
+/// usable once the invitation is accepted, which is the one step that proves the address belongs to
+/// the person being added.</para>
 /// </summary>
 internal static class UserProvisioning
 {
     private const string PasswordAlphabet =
         "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789@#$%&*";
 
-    public static async Task<(User User, string TempPassword)> CreateAsync(
+    public static async Task<User> CreateAsync(
         IAppDbContext db,
         ITenantContext tenant,
         IPasswordService passwords,
@@ -53,7 +57,14 @@ internal static class UserProvisioning
             await Subscription.PlanLimits.EnsureCanAddDeliveryBoyAsync(db, tenant, ct);
         await ValidateAreasAsync(db, areaIds, ct);
 
-        var tempPassword = GenerateTempPassword();
+        // PENDING, not live. The address typed here has not been proved to belong to the person being
+        // added, and a typo lands the invitation in a stranger's inbox — so the account must be
+        // unusable until someone opens that email and sets a password.
+        //
+        // The hash is of a throwaway secret nobody is ever told: it exists only so the column is never
+        // null (a null hash reads as "Google-only account" elsewhere) and so no password can match.
+        // Sign-in is refused twice over — LoginCommandHandler checks IsActive, and nothing can satisfy
+        // this hash. Acceptance (ResetPasswordCommandHandler) replaces it and flips the account live.
         var user = new User
         {
             Id = Guid.NewGuid(),
@@ -62,10 +73,11 @@ internal static class UserProvisioning
             Name = name,
             Mobile = mobile,
             Email = email,
-            PasswordHash = passwords.Hash(tempPassword),
+            PasswordHash = passwords.Hash(GenerateTempPassword()),
             AuthProvider = AuthProvider.Custom,
             PreferredLanguage = preferredLanguage,
-            IsActive = true
+            IsActive = false,
+            InviteAcceptedAt = null,
         };
         db.Users.Add(user);
 
@@ -79,7 +91,7 @@ internal static class UserProvisioning
                     AreaId = areaId
                 });
 
-        return (user, tempPassword);
+        return user;
     }
 
     /// <summary>Throws when adding a user would exceed the tenant plan's MaxUsers.</summary>

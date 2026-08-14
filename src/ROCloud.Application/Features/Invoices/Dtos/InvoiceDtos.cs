@@ -38,6 +38,17 @@ public sealed record InvoiceDto(
     /// list, so the UI says where the money came from instead of leaving a "Paid" with no receipts.
     /// </summary>
     decimal AllocatedFromPool,
+    /// <summary>
+    /// What the customer owed on everything else when this invoice was raised — frozen at generation.
+    /// Never part of <see cref="TotalAmount"/>; those dues are billed on their own invoices.
+    /// </summary>
+    decimal PreviousDue,
+    /// <summary>
+    /// <see cref="PreviousDue"/> + <see cref="Balance"/>: the one figure the customer was asked for on
+    /// the day. Because PreviousDue is a snapshot, this is what the PDF says forever — the screen should
+    /// show the live balance beside it once older dues are settled.
+    /// </summary>
+    decimal NetPayable,
     string Status,
     string? GstNumber,
     string? Notes,
@@ -91,7 +102,13 @@ public sealed record InvoicePdfModel(
     // no UPI id, has the QR switched off, or nothing is left to pay. UpiVpa is printed as TEXT beside
     // the QR so a customer can read where the money goes when the scan fails, or check it before paying.
     string? UpiPayload = null,
-    string? UpiVpa = null);
+    string? UpiVpa = null,
+    /// <summary>
+    /// What the customer owed on everything else when this invoice was raised — a snapshot, so a reprint
+    /// still shows what this document originally demanded. 0 skips the block entirely, which is what
+    /// keeps every invoice issued before this feature looking exactly as it did.
+    /// </summary>
+    decimal PreviousDue = 0m);
 
 public sealed record InvoicePdfLine(
     string Description, string Hsn, int Quantity, decimal Rate, decimal Amount);

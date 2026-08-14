@@ -75,6 +75,61 @@ public sealed record JarsDeliveredByProductDto(
 /// <summary>Net jars a customer still holds for one product (Σ Issue − Σ Return). Guide §9.</summary>
 public sealed record CustomerJarBalanceDto(Guid ProductId, string ProductName, string BottleSize, int Outstanding);
 
+/// <summary>
+/// One customer-month of jar movement: what went out, what came back, what is still held, and what it
+/// cost — the single view that answers "what happened on the 4th?" without cross-referencing three tabs.
+/// </summary>
+public sealed record CustomerLedgerDto(
+    string Month,                 // "YYYY-MM", echoed back so a late response can be matched to its request
+    int OpeningJarsOut,           // jars the customer held before the month started
+    int ClosingJarsOut,           // …and after it ended (== the jar-balance endpoint for the current month)
+    int TotalPut,
+    int TotalEmp,
+    decimal TotalAmount,
+    IReadOnlyList<CustomerLedgerRowDto> Rows,
+    IReadOnlyList<CustomerLedgerProductDto> Products);
+
+/// <summary>
+/// One product's month in summary — the heading of its group in the ledger. Totalled server-side in the
+/// same pass that produces the rows, so the portal and the app cannot arrive at different subtotals by
+/// each adding up the rows their own way.
+/// </summary>
+/// <param name="Opening">Jars of this product held before the month began.</param>
+/// <param name="Closing">…and after it ended. Equals this product's line in the jar-balance endpoint.</param>
+public sealed record CustomerLedgerProductDto(
+    Guid ProductId,
+    string ProductName,
+    string BottleSize,
+    int Opening,
+    int Closing,
+    int Put,
+    int Emp,
+    decimal Amount);
+
+/// <summary>
+/// One movement of jars. <paramref name="Put"/> and <paramref name="Emp"/> are mutually exclusive: a row
+/// is either a hand-over or a collection, never both, because that is how the underlying movements are
+/// recorded and merging them would hide a same-day return.
+/// </summary>
+/// <param name="Rem">Jars of THIS product still held after this row — a running total, computed server-side
+/// in one ordered pass so two clients can never disagree about it.</param>
+/// <param name="Amount">What was charged for this row. Empties carry 0: returning a jar is not a sale.</param>
+/// <param name="Invoiced">
+/// Whether an invoice period covers this date. Deliberately not "Paid": payments settle against a
+/// customer's oldest dues, not against a particular delivery, so a per-row paid flag would be invented.
+/// </param>
+public sealed record CustomerLedgerRowDto(
+    DateOnly Date,
+    string Kind,                  // "Delivery" | "Return" | "Damage"
+    Guid ProductId,
+    string ProductName,
+    string BottleSize,
+    int Put,
+    int Emp,
+    int Rem,
+    decimal Amount,
+    bool Invoiced);
+
 /// <summary>Filter/paging/sort options for the customer list.</summary>
 public sealed record CustomerFilterDto
 {

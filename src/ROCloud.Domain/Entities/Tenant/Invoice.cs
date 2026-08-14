@@ -18,6 +18,14 @@ public class Invoice : BaseEntity, ITenantEntity
     public decimal Discount { get; set; }
     public decimal TotalAmount { get; set; }
     public decimal PaidAmount { get; set; }
+
+    /// <summary>
+    /// What the customer owed on everything else at the moment this invoice was generated — a SNAPSHOT,
+    /// so a reprint months later shows the number the customer's copy shows. Display only: it is never
+    /// added to <see cref="TotalAmount"/>, because those dues are already billed on their own invoices
+    /// and charging them twice would break both the ledger and payment allocation.
+    /// </summary>
+    public decimal PreviousDue { get; set; }
     public InvoiceStatus Status { get; set; } = InvoiceStatus.Draft;
     public string? GstNumber { get; set; }
     public string? Notes { get; set; }

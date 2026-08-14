@@ -23,6 +23,9 @@ public interface IAppDbContext
     // Tenant-scoped
     DbSet<User> Users { get; }
     DbSet<UserArea> UserAreas { get; }
+
+    /// <summary>One row per signed-in device. Not tenant-filtered — see <see cref="UserSession"/>.</summary>
+    DbSet<UserSession> UserSessions { get; }
     DbSet<Role> Roles { get; }
     DbSet<Permission> Permissions { get; }
     DbSet<RolePermission> RolePermissions { get; }

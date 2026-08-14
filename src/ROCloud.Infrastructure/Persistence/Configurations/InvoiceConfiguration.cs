@@ -18,6 +18,7 @@ public class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         b.Property(i => i.Discount).HasPrecision(10, 2);
         b.Property(i => i.TotalAmount).HasPrecision(10, 2);
         b.Property(i => i.PaidAmount).HasPrecision(10, 2);
+        b.Property(i => i.PreviousDue).HasPrecision(12, 2);
 
         b.HasOne(i => i.Customer)
             .WithMany(c => c.Invoices)

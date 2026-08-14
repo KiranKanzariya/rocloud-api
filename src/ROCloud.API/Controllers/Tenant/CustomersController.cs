@@ -17,6 +17,7 @@ using ROCloud.Application.Features.CustomerSubscriptions.Commands.CreateCustomer
 using ROCloud.Application.Features.CustomerSubscriptions.Commands.UpdateCustomerSubscription;
 using ROCloud.Application.Features.Customers.Queries.GetCustomerById;
 using ROCloud.Application.Features.Customers.Queries.GetCustomerJarBalance;
+using ROCloud.Application.Features.Customers.Queries.GetCustomerLedger;
 using ROCloud.Application.Features.Customers.Queries.GetCustomerOpeningBalance;
 using ROCloud.Application.Features.Customers.Queries.GetCustomers;
 using ROCloud.Application.Features.Customers.Queries.GetCustomerStats;
@@ -47,6 +48,16 @@ public class CustomersController : ControllerBase
     [RequirePermission("Customers.View")]
     public async Task<IActionResult> GetCustomerStats(Guid id, CancellationToken ct)
         => Ok(ApiResponse<CustomerStatsDto>.Ok(await _mediator.Send(new GetCustomerStatsQuery(id), ct)));
+
+    /// <summary>
+    /// One month of jar movement for this customer — jars out, empties back, jars still held, and the
+    /// money — in one list. <paramref name="month"/> is "YYYY-MM"; omitted means the current IST month.
+    /// </summary>
+    [HttpGet("{id:guid}/ledger")]
+    [RequirePermission("Customers.View")]
+    public async Task<IActionResult> GetLedger(Guid id, [FromQuery] string? month, CancellationToken ct)
+        => Ok(ApiResponse<CustomerLedgerDto>.Ok(await _mediator.Send(
+            new GetCustomerLedgerQuery(id, month ?? $"{AppTimeZone.Today(DateTime.UtcNow):yyyy-MM}"), ct)));
 
     /// <summary>Net returnable jars the customer still holds, per product (Σ Issue − Σ Return).</summary>
     [HttpGet("{id:guid}/jar-balance")]

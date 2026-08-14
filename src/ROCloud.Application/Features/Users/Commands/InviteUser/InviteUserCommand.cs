@@ -61,31 +61,15 @@ public class InviteUserCommandHandler : IRequestHandler<InviteUserCommand, Guid>
 
     public async Task<Guid> Handle(InviteUserCommand request, CancellationToken ct)
     {
-        var (user, _) = await UserProvisioning.CreateAsync(
+        var user = await UserProvisioning.CreateAsync(
             _db, _tenant, _passwords,
             request.Name, request.Mobile, request.Email, request.RoleId,
             preferredLanguage: null, request.AreaIds, ct);
 
         await _db.SaveChangesAsync(ct);
 
-        // Emit a real, working invitation link: a password-reset token (consumed by the existing
-        // /reset-password flow) pointed at the tenant's own portal. Previously the link had no token,
-        // so the invited user could never set a password from it.
-        var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-        await _cache.SetAsync($"pwreset:{token}", new PasswordResetToken(user.Id), InviteTtl, ct);
-
-        var subdomain = await _db.Tenants
-            .Where(t => t.Id == _tenant.TenantId)
-            .Select(t => t.Subdomain)
-            .FirstAsync(ct);
-        var inviteUrl = $"{_settings.TenantUrlFormat.Replace("{subdomain}", subdomain)}/reset-password?token={token}";
-
-        await _email.SendAsync(
-            request.Email,
-            "You've been invited to ROCloud",
-            "You've been invited to join your team on ROCloud. " +
-            $"<a href=\"{inviteUrl}\">Accept your invitation</a> to set your password. " +
-            $"This link is valid for {InviteTtl.Days} days.", ct);
+        await UserInvitations.SendAsync(
+            _db, _cache, _email, _settings, _tenant.TenantId, user.Id, request.Email, ct);
 
         // TODO (Phase 14 — WhatsApp): also send the invitation link via MSG91/WhatsApp.
         _logger.LogInformation("TODO[Phase14]: WhatsApp invite to {Mobile}", request.Mobile);

@@ -100,6 +100,11 @@ public class BulkGenerateInvoicesCommandHandler
             var taxable = Math.Max(0m, subTotal - discount);
             var taxAmount = Math.Round(taxable * gstRate, 2);
 
+            // Snapshot what is owed on everything else, BEFORE this invoice exists — see InvoicePreviousDue.
+            // Nothing generated earlier in this loop belongs to this customer (one invoice each), so the
+            // still-unsaved invoices above cannot affect it.
+            var previousDue = await InvoicePreviousDue.ComputeAsync(_db, c.Id, subTotal, ct);
+
             seq++;
             var invoice = new Invoice
             {
@@ -116,6 +121,7 @@ public class BulkGenerateInvoicesCommandHandler
                 Discount = subTotal - taxable,
                 TotalAmount = taxable + taxAmount,
                 PaidAmount = 0m,
+                PreviousDue = previousDue,
                 Status = InvoiceStatus.Draft
             };
             _db.Invoices.Add(invoice);

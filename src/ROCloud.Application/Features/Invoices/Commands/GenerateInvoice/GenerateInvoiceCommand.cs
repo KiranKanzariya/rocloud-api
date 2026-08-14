@@ -110,6 +110,9 @@ public class GenerateInvoiceCommandHandler : IRequestHandler<GenerateInvoiceComm
         var invoiceDate = AppTimeZone.Today(DateTime.UtcNow);
         var dueDate = invoiceDate.AddDays(request.DueInDays ?? _settings.InvoiceDueInDays);
 
+        // Snapshot what is owed on everything else, BEFORE this invoice exists — see InvoicePreviousDue.
+        var previousDue = await InvoicePreviousDue.ComputeAsync(_db, customer.Id, subTotal, ct);
+
         var invoice = new Invoice
         {
             Id = Guid.NewGuid(),
@@ -125,6 +128,7 @@ public class GenerateInvoiceCommandHandler : IRequestHandler<GenerateInvoiceComm
             Discount = subTotal - taxable,   // effective discount (capped at subtotal)
             TotalAmount = totalAmount,
             PaidAmount = 0m,
+            PreviousDue = previousDue,
             Status = InvoiceStatus.Draft,
             GstNumber = null,   // customer GSTIN is not modelled in v1
             Notes = request.Notes

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
 using ROCloud.Application.Common.Settings;
@@ -32,20 +33,62 @@ public class AuthTokenIssuer
         _settings = settings;
     }
 
+    /// <summary>
+    /// Issues a session. <paramref name="sessionId"/> continues an existing device (refresh rotating
+    /// its token); omitted, it starts a new one — which is what makes signing in on a second device
+    /// additive rather than something that displaces the first.
+    /// </summary>
     public async Task<AuthResult> IssueAsync(
-        User user, Tenant tenant, IReadOnlyCollection<string> permissions, CancellationToken ct)
+        User user, Tenant tenant, IReadOnlyCollection<string> permissions, CancellationToken ct,
+        Guid? sessionId = null)
     {
         EnsureTenantAccessible(user, tenant);
 
         var access = _tokens.GenerateAccessToken(user, tenant, permissions);
         var refreshToken = $"{user.Id}.{_tokens.GenerateRefreshToken()}";
 
-        user.RefreshToken = _tokens.HashRefreshToken(refreshToken);
-        user.RefreshTokenExpiresAt = DateTime.UtcNow.AddDays(_settings.RefreshTokenExpiryDays);
+        _db.UserSessions.Add(new UserSession
+        {
+            Id = Guid.NewGuid(),
+            TenantId = user.TenantId,
+            UserId = user.Id,
+            SessionId = sessionId ?? Guid.NewGuid(),
+            TokenHash = _tokens.HashRefreshToken(refreshToken),
+            ExpiresAt = DateTime.UtcNow.AddDays(_settings.RefreshTokenExpiryDays)
+        });
+
+        // Deliberately does NOT clear user.RefreshToken. That column is the old single-slot session,
+        // and on the deploy that ships this table there are live ones in it; the refresh handler
+        // adopts them one at a time. Clearing it here would sign those users out of whichever device
+        // they were not currently using — the exact fault this change exists to remove.
+
         user.LastLoginAt = DateTime.UtcNow;
+
+        await PruneAsync(user.Id, ct);
         await _db.SaveChangesAsync(ct);
 
         return new AuthResult(access.Token, access.ExpiresAtUtc, refreshToken);
+    }
+
+    /// <summary>
+    /// Drops this user's spent rows on the way past, so the table stays roughly "one row per live
+    /// device" instead of growing by one every hour forever. Signing in is the natural moment: it is
+    /// rare, already writing, and scoped to the one user whose rows are being added to.
+    ///
+    /// Revoked rows are kept for a week first — a replayed token has to stay recognisable for long
+    /// enough to be worth recognising.
+    /// </summary>
+    private async Task PruneAsync(Guid userId, CancellationToken ct)
+    {
+        // ExecuteDeleteAsync is relational-only; the in-memory provider the tests use has no such
+        // path, and pruning is housekeeping, not behaviour, so it is simply skipped there.
+        if (!_db.IsRelational) return;
+
+        var cutoff = DateTime.UtcNow.AddDays(-7);
+        await _db.UserSessions
+            .Where(s => s.UserId == userId
+                        && (s.ExpiresAt < DateTime.UtcNow || (s.RevokedAt != null && s.RevokedAt < cutoff)))
+            .ExecuteDeleteAsync(ct);
     }
 
     /// <summary>

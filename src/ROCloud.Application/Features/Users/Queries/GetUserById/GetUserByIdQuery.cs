@@ -31,6 +31,7 @@ public class GetUserByIdQueryHandler : IRequestHandler<GetUserByIdQuery, UserDto
             user.Id, user.Name, user.Mobile, user.Email,
             user.RoleId, user.Role?.Name,
             user.AuthProvider.ToString().ToLower(),
-            user.PreferredLanguage, user.IsActive, user.LastLoginAt, user.CreatedAt, areas);
+            user.PreferredLanguage, user.IsActive, user.LastLoginAt, user.CreatedAt, areas,
+            user.InviteAcceptedAt is null);
     }
 }

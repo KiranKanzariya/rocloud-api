@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
+using ROCloud.Application.Common.Security;
 using ROCloud.Application.Features.Auth.Common;
 using ROCloud.Application.Features.Auth.Services;
 
@@ -32,22 +33,67 @@ public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, A
             .Include(u => u.Role).ThenInclude(r => r!.RolePermissions).ThenInclude(rp => rp.Permission)
             .FirstOrDefaultAsync(u => u.Id == userId && !u.IsDeleted, ct);
 
-        if (user is null || user.RefreshToken is null || !user.IsActive)
+        if (user is null || !user.IsActive)
             throw new InvalidCredentialsException();
 
         var presentedHash = _tokens.HashRefreshToken(request.RefreshToken);
-        if (!string.Equals(user.RefreshToken, presentedHash, StringComparison.Ordinal))
+        var now = DateTime.UtcNow;
+
+        var session = await _db.UserSessions
+            .FirstOrDefaultAsync(s => s.UserId == userId && s.TokenHash == presentedHash, ct);
+
+        if (session is null)
+            return await AdoptLegacySessionAsync(user, presentedHash, now, ct);
+
+        if (session.RevokedAt is not null)
         {
-            // A rotated/old token was replayed → assume theft and revoke ALL sessions.
-            user.RefreshToken = null;
-            user.RefreshTokenExpiresAt = null;
+            // This token was rotated away and has come back. Either a copy was taken, or a client is
+            // retrying with a token it should have replaced — in both cases this device's chain ends
+            // here. Only its chain: the whole reason this table exists is that one device must not be
+            // able to sign another one out.
+            await UserSessions.RevokeChainAsync(_db, session.SessionId, ct);
             await _db.SaveChangesAsync(ct);
             throw new InvalidCredentialsException();
         }
 
-        if (user.RefreshTokenExpiresAt is null || user.RefreshTokenExpiresAt <= DateTime.UtcNow)
+        if (session.ExpiresAt <= now)
             throw new InvalidCredentialsException();
 
+        // Rotation: this row stops being the live token, and the issuer writes the next one under the
+        // same SessionId, so the device keeps its identity across the swap.
+        session.RevokedAt = now;
+
+        return await IssueForAsync(user, session.SessionId, ct);
+    }
+
+    /// <summary>
+    /// TRANSITIONAL — delete once every live session predates the user_sessions table by more than
+    /// Jwt:RefreshTokenExpiryDays (30 days after the deploy that shipped it).
+    ///
+    /// Before this table there was one token per user, in users.refresh_token. Those sessions are
+    /// live at the moment of deploy, and rejecting them would sign every user of both products out
+    /// at once. Instead the first refresh that presents one is honoured, exactly once, and hands
+    /// that device a real session row; the column is cleared as it goes, so it cannot be replayed.
+    /// </summary>
+    private async Task<AuthResult> AdoptLegacySessionAsync(
+        Domain.Entities.Tenant.User user, string presentedHash, DateTime now, CancellationToken ct)
+    {
+        var matches = user.RefreshToken is not null
+                      && string.Equals(user.RefreshToken, presentedHash, StringComparison.Ordinal)
+                      && user.RefreshTokenExpiresAt > now;
+
+        if (!matches)
+            throw new InvalidCredentialsException();
+
+        user.RefreshToken = null;
+        user.RefreshTokenExpiresAt = null;
+
+        return await IssueForAsync(user, sessionId: null, ct);
+    }
+
+    private async Task<AuthResult> IssueForAsync(
+        Domain.Entities.Tenant.User user, Guid? sessionId, CancellationToken ct)
+    {
         var tenant = await _db.Tenants.IgnoreQueryFilters().Include(t => t.Plan)
             .FirstOrDefaultAsync(t => t.Id == user.TenantId, ct);
         if (tenant is null)
@@ -58,7 +104,6 @@ public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, A
             .Select(rp => rp.Permission!.Code)
             .ToArray() ?? [];
 
-        // Rotation: a new refresh token is issued and its hash stored, invalidating the old one.
-        return await _issuer.IssueAsync(user, tenant, permissions, ct);
+        return await _issuer.IssueAsync(user, tenant, permissions, ct, sessionId);
     }
 }

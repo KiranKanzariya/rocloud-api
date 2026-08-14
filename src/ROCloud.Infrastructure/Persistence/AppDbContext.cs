@@ -35,6 +35,7 @@ public class AppDbContext : DbContext, IAppDbContext
     // Tenant tables
     public DbSet<User> Users => Set<User>();
     public DbSet<UserArea> UserAreas => Set<UserArea>();
+    public DbSet<UserSession> UserSessions => Set<UserSession>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<Permission> Permissions => Set<Permission>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();

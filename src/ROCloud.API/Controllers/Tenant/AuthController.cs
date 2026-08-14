@@ -122,11 +122,30 @@ public class AuthController : ControllerBase
         return AuthOk(result);
     }
 
+    /// <summary>
+    /// Signs out THIS device. The refresh token says which one, and a native client posts it in the
+    /// body.
+    /// <para>
+    /// A browser does not: the refresh cookie is path-scoped to <c>/api/auth/refresh</c>, so it is
+    /// not sent here. That is fine and not worth widening the cookie's path for — the response
+    /// clears the cookie, which leaves the session row holding a token no one can present any more,
+    /// and the pruning in <c>AuthTokenIssuer</c> collects it later.
+    /// </para>
+    /// Either way the access token is blocklisted immediately. What must never happen is signing out
+    /// of one device ending every session on the account, which is what the old single-token column
+    /// did.
+    /// </summary>
     [HttpPost("logout")]
     [Authorize]
-    public async Task<IActionResult> Logout(CancellationToken ct)
+    public async Task<IActionResult> Logout(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] RefreshRequest? body,
+        CancellationToken ct)
     {
-        await _mediator.Send(new LogoutCommand(), ct);
+        var token = Request.Cookies[RefreshCookie];
+        if (string.IsNullOrEmpty(token))
+            token = body?.RefreshToken;
+
+        await _mediator.Send(new LogoutCommand(token), ct);
         ClearRefreshCookie();
         return Ok(new { success = true });
     }

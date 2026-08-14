@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
+using ROCloud.Application.Common.Security;
 using ROCloud.Domain.Enums;
 using ValidationException = ROCloud.Application.Common.Exceptions.ValidationException;
 
@@ -24,11 +25,13 @@ public class DeleteUserCommandHandler : IRequestHandler<DeleteUserCommand>
 
     private readonly IAppDbContext _db;
     private readonly ICurrentUserService _currentUser;
+    private readonly ICacheService _cache;
 
-    public DeleteUserCommandHandler(IAppDbContext db, ICurrentUserService currentUser)
+    public DeleteUserCommandHandler(IAppDbContext db, ICurrentUserService currentUser, ICacheService cache)
     {
         _db = db;
         _currentUser = currentUser;
+        _cache = cache;
     }
 
     public async Task Handle(DeleteUserCommand request, CancellationToken ct)
@@ -73,10 +76,15 @@ public class DeleteUserCommandHandler : IRequestHandler<DeleteUserCommand>
         // customer's area) and the table has no soft-delete column — drop the rows outright.
         _db.UserAreas.RemoveRange(user.AreaAssignments);
 
+        // The address is freed for re-invitation, so the OLD invitation must die with the row —
+        // otherwise the link from the mistyped invite could still be used against this user id.
+        await UserInvitations.RevokeAsync(_cache, user.Id, ct);
+
         user.IsDeleted = true;
         user.IsActive = false;          // any surviving access token stops being honoured on refresh
         user.RefreshToken = null;
         user.RefreshTokenExpiresAt = null;
+        await UserSessions.RevokeAllAsync(_db, user.Id, ct);
         await _db.SaveChangesAsync(ct);
     }
 }

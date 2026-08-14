@@ -76,7 +76,8 @@ public class GetUsersQueryHandler : IRequestHandler<GetUsersQuery, PagedResult<U
                 u.AreaAssignments
                     .Where(ua => ua.Area != null)
                     .Select(ua => new AssignedAreaDto(ua.AreaId, ua.Area!.Name))
-                    .ToList()))
+                    .ToList(),
+                u.InviteAcceptedAt == null))
             .ToListAsync(ct);
 
         return new PagedResult<UserListItemDto>(items, total, page, pageSize);

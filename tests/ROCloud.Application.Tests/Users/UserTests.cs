@@ -40,7 +40,8 @@ public class UserTests
     }
 
     private static CreateUserCommandHandler NewCreateHandler(AppDbContext db, TenantContext ctx)
-        => new(db, ctx, new FakePasswordService(), new NullEmailService());
+        => new(db, ctx, new FakePasswordService(), new NullEmailService(),
+               Auth.AuthTestHelpers.NewCache(), new Auth.FakeAppSettings());
 
     /// <summary>Seeds a plan (with the given user cap), the tenant, and a role; returns the role id.</summary>
     private static async Task<Guid> SeedTenantAsync(AppDbContext db, int maxUsers, string roleName = "DeliveryBoy")
@@ -116,7 +117,7 @@ public class UserTests
         db.Users.Add(new User { Id = userId, TenantId = TenantA, RoleId = roleId, Name = "Boy", Email = "b@x.com", IsActive = true, RefreshToken = "rt" });
         await db.SaveChangesAsync();
 
-        await new DeactivateUserCommandHandler(db).Handle(new DeactivateUserCommand(userId), CancellationToken.None);
+        await new DeactivateUserCommandHandler(db, Auth.AuthTestHelpers.NewCache()).Handle(new DeactivateUserCommand(userId), CancellationToken.None);
 
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId);
         Assert.NotNull(user);                 // row preserved (not deleted)
@@ -201,7 +202,7 @@ public class UserTests
     }
 
     private static DeleteUserCommandHandler NewDeleteHandler(AppDbContext db, Guid actingUserId)
-        => new(db, new FakeCurrentUser { UserId = actingUserId });
+        => new(db, new FakeCurrentUser { UserId = actingUserId }, Auth.AuthTestHelpers.NewCache());
 
     [Fact]
     public async Task DeleteUser_SoftDeletes_AndDropsAreasAndSession()

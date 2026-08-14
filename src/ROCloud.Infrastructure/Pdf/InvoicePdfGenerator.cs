@@ -129,6 +129,21 @@ public class InvoicePdfGenerator : IInvoicePdfGenerator
                     TotalLine(totals, "Paid", Money(m.PaidAmount), valueColor: ColTeal);
                     TotalLine(totals, "Balance", Money(balance), valueColor: ColDanger);
                 }
+
+                // What the customer owed on everything else on the day this was raised, and the single
+                // figure they were asked for. Both are frozen: PreviousDue is a snapshot, so a reprint
+                // after those older dues are settled still shows what this document originally demanded.
+                // The "as of" date is what stops that reading as a stale demand. Historical invoices
+                // carry 0 and skip the block entirely, so nothing changes on anything already issued.
+                if (m.PreviousDue > 0)
+                {
+                    totals.Item().PaddingTop(4).LineHorizontal(0.75f).LineColor(Colors.Grey.Lighten1);
+                    totals.Item().PaddingTop(3);
+                    TotalLine(totals, $"Previous Due (as of {m.InvoiceDate:dd MMM})", Money(m.PreviousDue),
+                        valueColor: ColDanger);
+                    TotalLine(totals, "Net Payable", Money(m.PreviousDue + balance),
+                        strong: true, size: 12, valueColor: ColDanger);
+                }
             });
 
             // Scan-to-pay, below the totals so the customer reads what they owe first. Draws nothing

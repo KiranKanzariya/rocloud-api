@@ -77,7 +77,8 @@ internal static class InvoicePdfModelBuilder
                     // they get to go on.
                     UpiPaymentLink.Reference(invoice.InvoiceNumber, customer.Name))
                 : null,
-            tenant.UpiQrEnabled ? tenant.UpiVpa : null);
+            tenant.UpiQrEnabled ? tenant.UpiVpa : null,
+            invoice.PreviousDue);
     }
 
     /// <summary>Strips internal note markers (e.g. the opening-balance tag) so they never leak onto the

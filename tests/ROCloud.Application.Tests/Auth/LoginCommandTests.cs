@@ -25,9 +25,13 @@ public class LoginCommandTests
         Assert.False(string.IsNullOrEmpty(result.AccessToken));
         Assert.False(string.IsNullOrEmpty(result.RefreshToken));
 
+        // The session lives in user_sessions now, one row per device — NOT in users.refresh_token,
+        // which held a single slot and made a second sign-in evict the first.
         var owner = await db.Users.IgnoreQueryFilters().FirstAsync();
-        Assert.False(string.IsNullOrEmpty(owner.RefreshToken));
-        Assert.NotNull(owner.RefreshTokenExpiresAt);
+        var session = await db.UserSessions.SingleAsync(s => s.UserId == owner.Id);
+        Assert.Null(session.RevokedAt);
+        Assert.True(session.ExpiresAt > DateTime.UtcNow);
+        Assert.Null(owner.RefreshToken);
     }
 
     [Fact]

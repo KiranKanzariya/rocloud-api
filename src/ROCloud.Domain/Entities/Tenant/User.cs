@@ -29,6 +29,17 @@ public class User : BaseEntity, ITenantEntity
     public string? PreferredLanguage { get; set; }
 
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// When this member opened their invitation and set a password. NULL = invited, never accepted —
+    /// the account exists but nobody has yet proved they own the address it was sent to, so it is not
+    /// active and cannot be signed in to.
+    ///
+    /// <para>This is what makes a mistyped invitation harmless: it stays pending, visible to the owner
+    /// as "Invited", instead of quietly becoming a working account for whoever received the email.</para>
+    /// </summary>
+    public DateTime? InviteAcceptedAt { get; set; }
+
     public DateTime? LastLoginAt { get; set; }
 
     // Navigation

@@ -11,7 +11,10 @@ public sealed record UserListItemDto(
     string AuthProvider,
     bool IsActive,
     DateTime? LastLoginAt,
-    IReadOnlyList<AssignedAreaDto> Areas);
+    IReadOnlyList<AssignedAreaDto> Areas,
+    /// <summary>Invited but never accepted — the account exists and cannot be signed in to. Kept
+    /// separate from IsActive so the list can tell 'waiting on them' from 'switched off by us'.</summary>
+    bool IsPending = false);
 
 /// <summary>Full team member for the detail view.</summary>
 public sealed record UserDto(
@@ -26,7 +29,8 @@ public sealed record UserDto(
     bool IsActive,
     DateTime? LastLoginAt,
     DateTime CreatedAt,
-    IReadOnlyList<AssignedAreaDto> Areas);
+    IReadOnlyList<AssignedAreaDto> Areas,
+    bool IsPending = false);
 
 public sealed record AssignedAreaDto(Guid AreaId, string AreaName);
 

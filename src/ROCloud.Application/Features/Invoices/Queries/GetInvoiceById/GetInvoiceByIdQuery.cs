@@ -52,6 +52,8 @@ public class GetInvoiceByIdQueryHandler : IRequestHandler<GetInvoiceByIdQuery, I
             invoice.PaidAmount,
             invoice.TotalAmount - invoice.PaidAmount,
             allocated,
+            invoice.PreviousDue,
+            invoice.PreviousDue + (invoice.TotalAmount - invoice.PaidAmount),
             invoice.Status.ToString(),
             invoice.GstNumber,
             invoice.Notes,

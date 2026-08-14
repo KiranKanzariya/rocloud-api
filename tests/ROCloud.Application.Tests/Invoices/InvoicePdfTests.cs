@@ -81,6 +81,44 @@ public class InvoicePdfTests
         AssertValidPdf(new InvoicePdfGenerator().Generate(model));
     }
 
+    [Fact]
+    public void Generate_WithPreviousDue_ProducesAValidPdf()
+    {
+        // Exercises the carry-forward block: previous due + net payable render above the total.
+        var model = new InvoicePdfModel(
+            "INV-202608-0007",
+            new DateOnly(2026, 8, 1), new DateOnly(2026, 8, 16),
+            new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31),
+            "Ashapura Water Supply", null, "Matam chowk",
+            "Prathvik Sankaliya", "9723816724", null,
+            [new InvoicePdfLine("Water Jar 18L (18L)", "2201", 2, 35m, 70m)],
+            SubTotal: 95m, CgstAmount: 0m, SgstAmount: 0m, Discount: 0m, TotalAmount: 95m,
+            Notes: null,
+            IsTaxInvoice: false, Status: "Sent", PaidAmount: 0m, BrandColor: null,
+            PreviousDue: 850m);
+
+        Assert.Equal(850m, model.PreviousDue);
+        AssertValidPdf(new InvoicePdfGenerator().Generate(model));
+    }
+
+    [Fact]
+    public void Generate_WithoutPreviousDue_OmitsTheBlock()
+    {
+        // Every invoice raised before this feature carries 0 and must render exactly as it used to.
+        var model = new InvoicePdfModel(
+            "INV-202605-0001",
+            new DateOnly(2026, 5, 1), new DateOnly(2026, 5, 16), null, null,
+            "Ashapura Water Supply", null, null,
+            "Prathvik Sankaliya", null, null,
+            [new InvoicePdfLine("Water Jar 18L (18L)", "2201", 2, 35m, 70m)],
+            SubTotal: 70m, CgstAmount: 0m, SgstAmount: 0m, Discount: 0m, TotalAmount: 70m,
+            Notes: null,
+            IsTaxInvoice: false, Status: "Sent", PaidAmount: 0m, BrandColor: null);
+
+        Assert.Equal(0m, model.PreviousDue);
+        AssertValidPdf(new InvoicePdfGenerator().Generate(model));
+    }
+
     private static void AssertValidPdf(byte[] bytes)
     {
         Assert.NotNull(bytes);

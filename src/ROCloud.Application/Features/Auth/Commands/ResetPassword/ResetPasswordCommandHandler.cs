@@ -30,9 +30,22 @@ public class ResetPasswordCommandHandler : IRequestHandler<ResetPasswordCommand>
             ?? throw new NotFoundException("User", data.UserId);
 
         user.PasswordHash = _passwords.Hash(request.NewPassword);
+
+        // First use of an invitation is what activates the account: opening the emailed link is the
+        // only proof we ever get that the address belongs to the person who was added. Guarded on
+        // InviteAcceptedAt, NOT on IsActive — a member an owner has deliberately switched off must
+        // stay off, and this must never be a way back in for them.
+        if (user.InviteAcceptedAt is null)
+        {
+            user.InviteAcceptedAt = DateTime.UtcNow;
+            user.IsActive = true;
+        }
         // Revoke all existing sessions after a password reset.
         user.RefreshToken = null;
         user.RefreshTokenExpiresAt = null;
+        // Every device, not just this one: whoever reset the password may be locking someone else
+        // out, and a session left alive on another phone is the whole failure being prevented.
+        await UserSessions.RevokeAllAsync(_db, user.Id, ct);
         await _db.SaveChangesAsync(ct);
 
         await _cache.RemoveAsync(key, ct);

@@ -2,6 +2,7 @@ using MediatR;
 using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
+using ROCloud.Application.Common.Security;
 using ValidationException = ROCloud.Application.Common.Exceptions.ValidationException;
 
 namespace ROCloud.Application.Features.Users.Commands.DeactivateUser;
@@ -17,8 +18,13 @@ public class DeactivateUserCommandHandler : IRequestHandler<DeactivateUserComman
     private const string OwnerRole = "Owner";
 
     private readonly IAppDbContext _db;
+    private readonly ICacheService _cache;
 
-    public DeactivateUserCommandHandler(IAppDbContext db) => _db = db;
+    public DeactivateUserCommandHandler(IAppDbContext db, ICacheService cache)
+    {
+        _db = db;
+        _cache = cache;
+    }
 
     public async Task Handle(DeactivateUserCommand request, CancellationToken ct)
     {
@@ -39,9 +45,14 @@ public class DeactivateUserCommandHandler : IRequestHandler<DeactivateUserComman
                 });
         }
 
+        // An unaccepted invitation is a pending grant of access — switching the member off has to
+        // switch that off too, or the link sitting in their inbox would turn the account back on.
+        await UserInvitations.RevokeAsync(_cache, user.Id, ct);
+
         user.IsActive = false;
         user.RefreshToken = null;
         user.RefreshTokenExpiresAt = null;
+        await UserSessions.RevokeAllAsync(_db, user.Id, ct);
         await _db.SaveChangesAsync(ct);
     }
 }
