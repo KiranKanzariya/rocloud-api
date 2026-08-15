@@ -2,6 +2,9 @@ using Microsoft.EntityFrameworkCore;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Features.Auth.Commands.RefreshToken;
 using ROCloud.Application.Features.Auth.Services;
+using ROCloud.Domain.Entities.Tenant;
+using ROCloud.Domain.Enums;
+using TenantEntity = ROCloud.Domain.Entities.Platform.Tenant;
 
 namespace ROCloud.Application.Tests.Auth;
 
@@ -105,6 +108,51 @@ public class RefreshTokenCommandTests
 
         await Assert.ThrowsAsync<InvalidCredentialsException>(() =>
             handler.Handle(new RefreshTokenCommand(session.RefreshToken), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Session_IsNotRestoredOntoAnotherWorkspacesSubdomain()
+    {
+        // The refresh cookie belongs to the API host, not to a tenant's subdomain, and this endpoint
+        // is excluded from the middleware that checks the two agree. So opening pani.rocloud.in while
+        // holding an Aqua session refreshed it happily and put Aqua's books behind Pani's URL —
+        // the right data for that token, under an address saying otherwise.
+        await using var db = AuthTestHelpers.NewDb();
+        var (tenant, owner) = await AuthTestHelpers.SeedAsync(db);
+        var (handler, issuer, _) = Build(db);
+
+        var other = new TenantEntity
+        {
+            Id = Guid.NewGuid(),
+            PlanId = tenant.PlanId,
+            Name = "Pani RO",
+            Subdomain = "pani",
+            OwnerName = "Someone",
+            OwnerEmail = "owner@pani.test",
+            OwnerMobile = "9999999998",
+            Status = TenantStatus.Active,
+            DefaultLanguage = "en"
+        };
+        db.Tenants.Add(other);
+        await db.SaveChangesAsync();
+
+        var session = await issuer.IssueAsync(owner, tenant, ["Customers.View"], CancellationToken.None);
+
+        await Assert.ThrowsAsync<InvalidCredentialsException>(() => handler.Handle(
+            new RefreshTokenCommand(session.RefreshToken, other.Subdomain),
+            CancellationToken.None));
+
+        // Its own workspace still works, and so does a request that names none — the apex sign-in
+        // page and the Google handoff both refresh from a host that resolves to no tenant.
+        var onOwn = await handler.Handle(
+            new RefreshTokenCommand(session.RefreshToken, AuthTestHelpers.Subdomain),
+            CancellationToken.None);
+        Assert.NotEqual(session.RefreshToken, onOwn.RefreshToken);
+
+        var anywhere = await handler.Handle(
+            new RefreshTokenCommand(onOwn.RefreshToken),
+            CancellationToken.None);
+        Assert.NotEqual(onOwn.RefreshToken, anywhere.RefreshToken);
     }
 
     [Fact]

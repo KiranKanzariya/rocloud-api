@@ -118,7 +118,9 @@ public class AuthController : ControllerBase
         if (string.IsNullOrEmpty(token))
             return Unauthorized(new { error = "No refresh token.", code = "NO_REFRESH_TOKEN" });
 
-        var result = await _mediator.Send(new RefreshCmd(token), ct);
+        // The workspace this request was made on. Passed so a session cannot be restored onto a
+        // different tenant's subdomain — see RefreshTokenCommandHandler.
+        var result = await _mediator.Send(new RefreshCmd(token, ResolveSubdomain()), ct);
         return AuthOk(result);
     }
 

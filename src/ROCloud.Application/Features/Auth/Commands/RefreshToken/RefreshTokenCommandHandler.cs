@@ -36,6 +36,8 @@ public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, A
         if (user is null || !user.IsActive)
             throw new InvalidCredentialsException();
 
+        await EnsureWorkspaceMatchesAsync(request.Subdomain, user.TenantId, ct);
+
         var presentedHash = _tokens.HashRefreshToken(request.RefreshToken);
         var now = DateTime.UtcNow;
 
@@ -67,6 +69,32 @@ public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, A
     }
 
     /// <summary>
+    /// Refuses to restore a session onto a workspace it does not belong to.
+    ///
+    /// The refresh cookie belongs to the API host, not to a tenant's subdomain, so the browser sends
+    /// it from ANY workspace under the domain — and this endpoint is excluded from TenantMiddleware,
+    /// which is what checks the JWT's tenant against the host everywhere else. Together those meant
+    /// that opening <c>pani.rocloud.in</c> while holding an Aqua session refreshed it happily and put
+    /// Aqua's books behind Pani's address bar. No tenant ever saw another's data — the token was
+    /// honestly Aqua's — but the URL said something false, which is its own kind of wrong.
+    ///
+    /// A 401 is the right answer rather than a mismatch error: the caller genuinely has no session on
+    /// THIS workspace, and the portal already treats a failed refresh as "show the sign-in page".
+    /// Silence when no subdomain is supplied — the apex sign-in page and the handoff both refresh
+    /// from a host that names no tenant, and neither is doing anything wrong.
+    private async Task EnsureWorkspaceMatchesAsync(
+        string? subdomain, Guid tenantId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(subdomain)) return;
+
+        var requested = await _db.Tenants.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Subdomain == subdomain && !t.IsDeleted, ct);
+
+        // An unknown subdomain names no workspace to be wrong about.
+        if (requested is not null && requested.Id != tenantId)
+            throw new InvalidCredentialsException();
+    }
+
     /// TRANSITIONAL — delete once every live session predates the user_sessions table by more than
     /// Jwt:RefreshTokenExpiryDays (30 days after the deploy that shipped it).
     ///
