@@ -142,7 +142,7 @@ public class SessionManagementTests
         await issuer.IssueAsync(owner, tenant, [], CancellationToken.None);
         var target = (await db.UserSessions.OrderBy(s => s.CreatedAt).LastAsync()).SessionId;
 
-        await new RevokeSessionCommandHandler(db, new FakeCurrentUser { UserId = owner.Id })
+        await new RevokeSessionCommandHandler(db, new FakeCurrentUser { UserId = owner.Id }, new SessionValidityService(db, AuthTestHelpers.NewCache()))
             .Handle(new RevokeSessionCommand(target), CancellationToken.None);
 
         var live = await db.UserSessions.Where(s => s.RevokedAt == null).ToListAsync();
@@ -166,7 +166,7 @@ public class SessionManagementTests
         // NotFound, not Forbidden: a distinguishable answer would confirm that a guessed id belongs
         // to somebody.
         await Assert.ThrowsAsync<NotFoundException>(() =>
-            new RevokeSessionCommandHandler(db, new FakeCurrentUser { UserId = owner.Id })
+            new RevokeSessionCommandHandler(db, new FakeCurrentUser { UserId = owner.Id }, new SessionValidityService(db, AuthTestHelpers.NewCache()))
                 .Handle(new RevokeSessionCommand(theirs), CancellationToken.None));
 
         Assert.All(await db.UserSessions.ToListAsync(), s => Assert.Null(s.RevokedAt));
@@ -186,15 +186,43 @@ public class SessionManagementTests
         await issuer.IssueAsync(owner, tenant, [], CancellationToken.None);
         var session = (await db.UserSessions.FirstAsync()).SessionId;
 
-        Assert.True(await validity.IsSessionLiveAsync(session));
+        Assert.True(await validity.IsSessionLiveAsync(owner.Id, session));
 
-        await new RevokeSessionCommandHandler(db, new FakeCurrentUser { UserId = owner.Id })
+        await new RevokeSessionCommandHandler(db, new FakeCurrentUser { UserId = owner.Id }, new SessionValidityService(db, AuthTestHelpers.NewCache()))
             .Handle(new RevokeSessionCommand(session), CancellationToken.None);
 
         // A fresh service, because the answer is cached for a minute — that TTL is the documented
         // bound on how long a revoke takes to bite, not a licence to never notice.
         Assert.False(await new SessionValidityService(db, AuthTestHelpers.NewCache())
-            .IsSessionLiveAsync(session));
+            .IsSessionLiveAsync(owner.Id, session));
+    }
+
+    [Fact]
+    public async Task RevokingADevice_TakesEffectAtOnce_EvenWithAWarmCache()
+    {
+        // The reported behaviour: signing a PHONE out from the portal took noticeably longer than
+        // signing a browser out. The browser was never really faster — it holds its access token in
+        // memory only, so any reload goes through refresh, which reads the row directly. The phone
+        // persists its token, so it rides on the cached "still live" answer until the entry lapses.
+        //
+        // Priming the cache on revoke closes that gap. The TTL is still what guarantees correctness;
+        // this only brings the effect forward.
+        await using var db = AuthTestHelpers.NewDb();
+        var (tenant, owner) = await AuthTestHelpers.SeedAsync(db);
+        var cache = AuthTestHelpers.NewCache();
+        var validity = new SessionValidityService(db, cache);
+
+        await Issuer(db).IssueAsync(owner, tenant, [], CancellationToken.None);
+        var session = (await db.UserSessions.FirstAsync()).SessionId;
+
+        // Warm the cache, exactly as a device making requests would.
+        Assert.True(await validity.IsSessionLiveAsync(owner.Id, session));
+
+        await new RevokeSessionCommandHandler(db, new FakeCurrentUser { UserId = owner.Id }, validity)
+            .Handle(new RevokeSessionCommand(session), CancellationToken.None);
+
+        // Same service, same warm cache — no waiting for the TTL.
+        Assert.False(await validity.IsSessionLiveAsync(owner.Id, session));
     }
 
     [Fact]
@@ -215,7 +243,7 @@ public class SessionManagementTests
         await refresher.RefreshAsync(device.RefreshToken);
 
         Assert.True(await new SessionValidityService(db, AuthTestHelpers.NewCache())
-            .IsSessionLiveAsync(session));
+            .IsSessionLiveAsync(owner.Id, session));
     }
 
     // ─── account-wide revocation ──────────────────────────────────────────

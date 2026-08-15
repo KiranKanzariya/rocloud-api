@@ -21,11 +21,14 @@ public class RevokeSessionCommandHandler : IRequestHandler<RevokeSessionCommand>
 {
     private readonly IAppDbContext _db;
     private readonly ICurrentUserService _currentUser;
+    private readonly SessionValidityService _sessions;
 
-    public RevokeSessionCommandHandler(IAppDbContext db, ICurrentUserService currentUser)
+    public RevokeSessionCommandHandler(
+        IAppDbContext db, ICurrentUserService currentUser, SessionValidityService sessions)
     {
         _db = db;
         _currentUser = currentUser;
+        _sessions = sessions;
     }
 
     public async Task Handle(RevokeSessionCommand request, CancellationToken ct)
@@ -46,5 +49,10 @@ public class RevokeSessionCommandHandler : IRequestHandler<RevokeSessionCommand>
 
         await UserSessions.RevokeChainAsync(_db, request.SessionId, ct);
         await _db.SaveChangesAsync(ct);
+
+        // AFTER the save: telling the cache a session is dead before the row says so would, on a
+        // failed save, leave a working device locked out with nothing to explain it. This only
+        // brings the effect forward — the cache TTL would reach the same answer within a minute.
+        await _sessions.MarkSessionRevokedAsync(request.SessionId, ct);
     }
 }

@@ -152,7 +152,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 // would keep working on its existing access token for the rest of the hour — the worst
                 // possible answer when the reason for revoking is that somebody else has the phone.
                 if (Guid.TryParse(ctx.Principal.FindFirst("sid")?.Value, out var sessionId)
-                    && !await sessions.IsSessionLiveAsync(sessionId))
+                    && !await sessions.IsSessionLiveAsync(userId, sessionId))
                     ctx.Fail("Session revoked");
             }
         };

@@ -86,18 +86,42 @@ public class SessionValidityService
     /// the reason for pressing it is that somebody else has the phone. Cached like the cutoff, so it
     /// bites within a minute and costs at most one indexed read per session per minute.
     /// </remarks>
-    public async Task<bool> IsSessionLiveAsync(Guid sessionId, CancellationToken ct = default)
+    public async Task<bool> IsSessionLiveAsync(Guid userId, Guid sessionId, CancellationToken ct = default)
     {
-        var key = $"session_live:{sessionId}";
-        var cached = await _cache.GetAsync<SessionLiveness>(key, ct);
+        var cached = await _cache.GetAsync<SessionLiveness>(SessionKey(sessionId), ct);
         if (cached is not null) return cached.IsLive;
 
+        // Filtered on user_id AND session_id so it uses idx_user_sessions_user_session. On
+        // session_id alone Postgres cannot use that index — it is not the leading column — and this
+        // runs on every authenticated request, so it would have degraded to a scan as the table grew.
         var live = await _db.UserSessions
-            .AnyAsync(s => s.SessionId == sessionId && s.RevokedAt == null, ct);
+            .AnyAsync(s => s.UserId == userId && s.SessionId == sessionId && s.RevokedAt == null, ct);
 
-        await _cache.SetAsync(key, new SessionLiveness(live), TimeSpan.FromSeconds(CacheSeconds), ct);
+        await _cache.SetAsync(
+            SessionKey(sessionId), new SessionLiveness(live), TimeSpan.FromSeconds(CacheSeconds), ct);
         return live;
     }
+
+    /// <summary>
+    /// Records straight away that a device has been signed out, instead of waiting for its cache
+    /// entry to lapse.
+    /// </summary>
+    /// <remarks>
+    /// An optimisation, not the correctness mechanism — <see cref="CacheSeconds"/> still bounds how
+    /// stale any answer can be, so forgetting to call this delays a revoke rather than losing it.
+    /// That split is deliberate: correctness from the TTL, speed from priming.
+    /// <para>
+    /// It matters because of who presses the button. "Sign out this device" is reached for when
+    /// somebody else has the phone, and a minute is a long time to watch a screen you no longer
+    /// trust. The web never had this wait — the portal holds its access token in memory only, so any
+    /// reload goes through refresh, which reads the row directly.
+    /// </para>
+    /// </remarks>
+    public Task MarkSessionRevokedAsync(Guid sessionId, CancellationToken ct = default)
+        => _cache.SetAsync(
+            SessionKey(sessionId), new SessionLiveness(false), TimeSpan.FromSeconds(CacheSeconds), ct);
+
+    private static string SessionKey(Guid sessionId) => $"session_live:{sessionId}";
 
     /// <summary>
     /// The same check for a platform staff token. Separate because a platform token's <c>sub</c> names
