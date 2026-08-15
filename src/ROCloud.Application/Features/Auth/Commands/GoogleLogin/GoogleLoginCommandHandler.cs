@@ -35,10 +35,17 @@ public class GoogleLoginCommandHandler : IRequestHandler<GoogleLoginCommand, Aut
         if (tenant is null)
             throw new NotFoundException("Tenant", request.TenantSubdomain ?? string.Empty);
 
+        // Match the linked Google identity first. The email fallback is what lets an existing password
+        // account sign in with Google the first time — but it is restricted to accounts that have NOT
+        // yet linked one. Without that restriction, a second Google identity claiming the same address
+        // would match an account already bound to a different one, so linking would never actually
+        // close the door it appears to close. (The address is verified before we get here —
+        // GoogleAuthService rejects an unverified email outright.)
         var user = await _db.Users.IgnoreQueryFilters()
             .Include(u => u.Role).ThenInclude(r => r!.RolePermissions).ThenInclude(rp => rp.Permission)
             .FirstOrDefaultAsync(u => u.TenantId == tenant.Id && !u.IsDeleted
-                && (u.GoogleId == info.Subject || u.Email == info.Email), ct);
+                && (u.GoogleId == info.Subject
+                    || ((u.GoogleId == null || u.GoogleId == "") && u.Email == info.Email)), ct);
 
         // Invite-only: Google sign-in never auto-creates a member. The user must already exist in this
         // workspace (invited by an owner, or the owner who registered with Google). New businesses sign

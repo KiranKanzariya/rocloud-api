@@ -39,8 +39,13 @@ public class ResolveGoogleWorkspacesCommandHandler
             throw new InvalidCredentialsException();
 
         // Active members for this Google identity across all tenants (invite-only: no auto-create).
+        // Same matching rule as GoogleLoginCommandHandler — see the note there. It matters more here:
+        // this step hands back a handoff grant per workspace, so a loose match would mint sessions on
+        // every workspace the address appears in.
         var users = await _db.Users.IgnoreQueryFilters()
-            .Where(u => !u.IsDeleted && u.IsActive && (u.GoogleId == info.Subject || u.Email == info.Email))
+            .Where(u => !u.IsDeleted && u.IsActive
+                && (u.GoogleId == info.Subject
+                    || ((u.GoogleId == null || u.GoogleId == "") && u.Email == info.Email)))
             .Select(u => new { u.Id, u.TenantId })
             .ToListAsync(ct);
         if (users.Count == 0)

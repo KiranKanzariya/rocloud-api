@@ -12,7 +12,12 @@ namespace ROCloud.Application.Features.Auth.Commands.GoogleHandoff;
 /// after Google verification) for a real session on this tenant. Establishes the access token + refresh
 /// cookie exactly like a password login. The handoff token is short-lived (~90s) and purpose-scoped.
 /// </summary>
-public sealed record GoogleHandoffCommand(string Grant) : IRequest<AuthResult>;
+/// <param name="Grant">The one-time handoff token minted by the apex step.</param>
+/// <param name="Subdomain">
+/// The workspace this grant is being redeemed on, from <c>X-Tenant</c> or the host. Null when the
+/// host names no workspace, which is not an error — the apex redeems nothing.
+/// </param>
+public sealed record GoogleHandoffCommand(string Grant, string? Subdomain = null) : IRequest<AuthResult>;
 
 public class GoogleHandoffCommandHandler : IRequestHandler<GoogleHandoffCommand, AuthResult>
 {
@@ -43,6 +48,14 @@ public class GoogleHandoffCommandHandler : IRequestHandler<GoogleHandoffCommand,
             .FirstOrDefaultAsync(t => t.Id == payload.TenantId && !t.IsDeleted, ct);
         if (tenant is null)
             throw new NotFoundException("Tenant", payload.TenantId.ToString());
+
+        // The grant names one workspace; redeem it on that workspace's host or not at all. Redeeming
+        // an Aqua grant at pani.rocloud.in used to succeed and file an Aqua session under Pani's
+        // cookie name, after which every request 403'd on TENANT_MISMATCH and every refresh 401'd on
+        // the workspace guard — a tab wedged by a mistake the server could see the whole time.
+        if (!string.IsNullOrWhiteSpace(request.Subdomain)
+            && !string.Equals(request.Subdomain, tenant.Subdomain, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidCredentialsException();
 
         var permissions = user.Role?.RolePermissions
             .Where(rp => rp.Permission != null)

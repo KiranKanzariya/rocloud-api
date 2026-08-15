@@ -117,8 +117,8 @@ public class PendingInviteTests
         var handler = new LoginCommandHandler(
             db,
             new ROCloud.Infrastructure.Identity.PasswordService(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build()),
-            new ROCloud.Application.Common.Security.LoginAttemptService(Auth.AuthTestHelpers.NewCache(), new Auth.FakeAppSettings()),
-            new ROCloud.Application.Features.Auth.Services.AuthTokenIssuer(db, new Auth.FakeTokenService(), new Auth.FakeAppSettings()));
+            new ROCloud.Application.Common.Security.LoginAttemptService(new Auth.FakeAppSettings()),
+            new ROCloud.Application.Features.Auth.Services.AuthTokenIssuer(db, new Auth.FakeTokenService(), new Auth.FakeAppSettings(), new Auth.FakeDeviceContext()));
 
         await Assert.ThrowsAnyAsync<Exception>(() => handler.Handle(
             new LoginCommand("akash@gmail.com", "anything", "aqua"), CancellationToken.None));

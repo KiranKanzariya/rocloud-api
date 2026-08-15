@@ -28,6 +28,12 @@ public class CheckSubdomainQueryHandler : IRequestHandler<CheckSubdomainQuery, S
         if (sub.Length < 3)
             return new SubdomainAvailabilityDto(sub, false);
 
+        // Reported as unavailable rather than as a distinct "reserved" state: from the registrant's
+        // side the two are the same answer — pick another name — and saying which platform hosts exist
+        // is information the signup form has no reason to hand out.
+        if (ReservedSubdomains.IsReserved(sub))
+            return new SubdomainAvailabilityDto(sub, false);
+
         var taken = await _db.Tenants.IgnoreQueryFilters()
             .AnyAsync(t => t.Subdomain == sub && !t.IsDeleted, ct);
 

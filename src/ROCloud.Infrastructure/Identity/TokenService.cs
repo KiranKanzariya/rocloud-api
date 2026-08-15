@@ -18,7 +18,21 @@ public class TokenService : ITokenService
 
     public TokenService(IConfiguration config) => _config = config;
 
-    public GeneratedAccessToken GenerateAccessToken(User user, Tenant tenant, IReadOnlyCollection<string> permissions)
+    /// <summary>
+    /// Issues a tenant access token.
+    /// </summary>
+    /// <param name="lifetime">
+    /// Overrides <c>Jwt:AccessTokenExpiryMinutes</c>. Used by platform impersonation, which has no
+    /// business lasting as long as a real working session.
+    /// </param>
+    /// <param name="actAs">
+    /// Who is really driving, when it is not the user named in <c>sub</c> — the platform operator's
+    /// address during impersonation. Emitted as the standard <c>act</c> claim so the audit trail says
+    /// "staff X acting as owner Y" rather than just "owner Y", which is what it looked like before.
+    /// </param>
+    public GeneratedAccessToken GenerateAccessToken(
+        User user, Tenant tenant, IReadOnlyCollection<string> permissions,
+        TimeSpan? lifetime = null, string? actAs = null, Guid? sessionId = null)
     {
         var secret = _config["Jwt:Secret"];
         if (string.IsNullOrWhiteSpace(secret))
@@ -27,12 +41,18 @@ public class TokenService : ITokenService
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
         var minutes = int.TryParse(_config["Jwt:AccessTokenExpiryMinutes"], out var m) ? m : 60;
-        var expiresAt = DateTime.UtcNow.AddMinutes(minutes);
+        var issuedAt = DateTime.UtcNow;
+        var expiresAt = issuedAt.Add(lifetime ?? TimeSpan.FromMinutes(minutes));
 
         var claims = new List<Claim>
         {
             new("sub", user.Id.ToString()),
             new("jti", Guid.NewGuid().ToString()),
+            // Issued-at, as our own claim rather than the registered "iat". The JWT handler populates
+            // the registered one itself, and adding a second would produce a duplicate whose winner
+            // depends on library version — not something an authorization decision should rest on.
+            // Read by SessionValidityService to refuse tokens minted before a revocation.
+            new(TokenIssuedAtClaim, ToUnixSeconds(issuedAt).ToString(), ClaimValueTypes.Integer64),
             new("email", user.Email ?? string.Empty),
             new("name", user.Name),
             new("tenant_id", tenant.Id.ToString()),
@@ -44,6 +64,14 @@ public class TokenService : ITokenService
             new("permissions", string.Join(",", permissions))
         };
 
+        if (!string.IsNullOrWhiteSpace(actAs))
+            claims.Add(new Claim("act", actAs));
+
+        // Which signed-in device this token belongs to, so the sessions list can say "this device".
+        // Absent on impersonation, which creates no session row.
+        if (sessionId is { } sid)
+            claims.Add(new Claim("sid", sid.ToString()));
+
         var token = new JwtSecurityToken(
             issuer: _config["Jwt:Issuer"],
             audience: _config["Jwt:Audience"],
@@ -54,6 +82,11 @@ public class TokenService : ITokenService
         return new GeneratedAccessToken(new JwtSecurityTokenHandler().WriteToken(token), expiresAt);
     }
 
+    /// <summary>Our own issued-at claim. See the note where it is written.</summary>
+    public const string TokenIssuedAtClaim = "token_iat";
+
+    private static long ToUnixSeconds(DateTime utc) => new DateTimeOffset(utc, TimeSpan.Zero).ToUnixTimeSeconds();
+
     public GeneratedAccessToken GeneratePlatformToken(PlatformUser platformUser)
     {
         var secret = _config["Jwt:Secret"];
@@ -63,12 +96,15 @@ public class TokenService : ITokenService
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
         var minutes = int.TryParse(_config["Jwt:AccessTokenExpiryMinutes"], out var m) ? m : 60;
-        var expiresAt = DateTime.UtcNow.AddMinutes(minutes);
+        var issuedAt = DateTime.UtcNow;
+        var expiresAt = issuedAt.AddMinutes(minutes);
 
         var claims = new List<Claim>
         {
             new("sub", platformUser.Id.ToString()),
             new("jti", Guid.NewGuid().ToString()),
+            // Same issued-at claim as a tenant token, read for the same reason — see the note there.
+            new(TokenIssuedAtClaim, ToUnixSeconds(issuedAt).ToString(), ClaimValueTypes.Integer64),
             new("email", platformUser.Email),
             new("name", platformUser.Name),
             new("platform_role", platformUser.PlatformRole)

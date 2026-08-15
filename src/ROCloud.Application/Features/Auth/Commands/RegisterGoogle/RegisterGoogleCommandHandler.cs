@@ -58,6 +58,14 @@ public class RegisterGoogleCommandHandler : IRequestHandler<RegisterGoogleComman
                 ["subdomain"] = ["Could not derive a valid subdomain from the business name."]
             });
 
+        // Same reasoning as RegisterCommandHandler: the slug usually comes from the business name, so
+        // the reserved check has to run on the derived value, not on what was typed.
+        if (ReservedSubdomains.IsReserved(subdomain))
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["subdomain"] = [$"The subdomain '{subdomain}' is reserved. Please choose another."]
+            });
+
         var taken = await _db.Tenants.IgnoreQueryFilters()
             .AnyAsync(t => t.Subdomain == subdomain && !t.IsDeleted, ct);
         if (taken)

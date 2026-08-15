@@ -63,6 +63,7 @@ public static class DependencyInjection
         services.AddSingleton<ITokenService, TokenService>();
         services.AddScoped<IGoogleAuthService, GoogleAuthService>();
         services.AddScoped<ICurrentUserService, CurrentUserService>();
+        services.AddScoped<IDeviceContext, DeviceContext>();
 
         // External services (guide §14). Email + MSG91 SMS/WhatsApp. All degrade to
         // logging when their API keys aren't configured, so dev/tests run without credentials.

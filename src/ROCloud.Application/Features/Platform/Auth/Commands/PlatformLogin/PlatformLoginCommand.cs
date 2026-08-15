@@ -39,23 +39,30 @@ public class PlatformLoginCommandHandler : IRequestHandler<PlatformLoginCommand,
 
     public async Task<PlatformAuthResult> Handle(PlatformLoginCommand request, CancellationToken ct)
     {
-        var clientId = $"platform:{request.Email}".ToLowerInvariant();
-
-        if (await _attempts.IsLockedOutAsync(clientId, ct))
-            throw new AccountLockedException(_attempts.LockoutMinutes);
-
         var user = await _db.PlatformUsers
             .FirstOrDefaultAsync(u => u.Email == request.Email, ct);
+
+        // The lockout lives on the row now, so it can only be read once the account is loaded. It used
+        // to be an in-memory counter keyed on the address, which every restart reset — on the sign-in
+        // that reaches every workspace on the platform.
+        if (user is not null && _attempts.IsLockedOut(user))
+            throw new AccountLockedException(_attempts.LockoutMinutes);
 
         if (user is null || user.PasswordHash is null || !user.IsActive
             || !_passwords.Verify(request.Password, user.PasswordHash))
         {
-            await _attempts.RecordFailureAsync(clientId, ct);
+            if (user is not null)
+            {
+                _attempts.RecordFailure(user);
+                await _db.SaveChangesAsync(ct);
+            }
+
             await Task.Delay(Random.Shared.Next(200, 400), ct);
             throw new InvalidCredentialsException();
         }
 
-        await _attempts.ClearAsync(clientId, ct);
+        // Persisted by the issuer's SaveChanges, in the same unit of work as the new session.
+        _attempts.Clear(user);
         return await _issuer.IssueAsync(user, ct);
     }
 }

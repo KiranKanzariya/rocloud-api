@@ -97,18 +97,63 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
                 Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Secret"]
                     ?? throw new InvalidOperationException("Jwt:Secret is not configured")))
         };
-        // Reject revoked tokens (logout / password change) — guide §10.3.
+        // Reject revoked tokens — guide §10.3. Two independent checks, because they cover different
+        // things: the blocklist knows about tokens we have SEEN (this jti signed out), while the
+        // account cutoff covers every token a user holds, including ones nobody recorded — which is
+        // what a password reset, a deactivation or a deletion actually needs to invalidate.
         options.Events = new JwtBearerEvents
         {
             OnTokenValidated = async ctx =>
             {
+                var services = ctx.HttpContext.RequestServices;
+
                 var jti = ctx.Principal?.FindFirst("jti")?.Value;
                 if (jti is not null)
                 {
-                    var blocklist = ctx.HttpContext.RequestServices.GetRequiredService<TokenBlocklistService>();
+                    var blocklist = services.GetRequiredService<TokenBlocklistService>();
                     if (await blocklist.IsBlockedAsync(jti))
+                    {
                         ctx.Fail("Token revoked");
+                        return;
+                    }
                 }
+
+                if (ctx.Principal is not { } principal) return;
+                if (!Guid.TryParse(principal.FindFirst("sub")?.Value, out var userId)) return;
+
+                // A token minted before token_iat existed carries no issue time. Treat it as issued
+                // now — i.e. still acceptable — so the deploy that adds this does not sign everyone
+                // out. Those tokens are gone within Jwt:AccessTokenExpiryMinutes.
+                if (!long.TryParse(
+                        principal.FindFirst(ROCloud.Infrastructure.Identity.TokenService.TokenIssuedAtClaim)?.Value,
+                        out var issuedUnix))
+                    return;
+
+                var sessions = services.GetRequiredService<SessionValidityService>();
+                var issuedAt = DateTimeOffset.FromUnixTimeSeconds(issuedUnix).UtcDateTime;
+
+                // Platform staff live in a different table. Their tokens reach every workspace, so
+                // this is the widest version of the problem, not one to skip.
+                if (principal.FindFirst("tenant_id") is null)
+                {
+                    if (principal.FindFirst("platform_role") is not null
+                        && !await sessions.IsPlatformTokenAcceptableAsync(userId, issuedAt))
+                        ctx.Fail("Session revoked");
+                    return;
+                }
+
+                if (!await sessions.IsAcceptableAsync(userId, issuedAt))
+                {
+                    ctx.Fail("Session revoked");
+                    return;
+                }
+
+                // "Sign out this device", pressed from another one. Without this the revoked device
+                // would keep working on its existing access token for the rest of the hour — the worst
+                // possible answer when the reason for revoking is that somebody else has the phone.
+                if (Guid.TryParse(ctx.Principal.FindFirst("sid")?.Value, out var sessionId)
+                    && !await sessions.IsSessionLiveAsync(sessionId))
+                    ctx.Fail("Session revoked");
             }
         };
     });

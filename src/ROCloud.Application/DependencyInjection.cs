@@ -37,6 +37,7 @@ public static class DependencyInjection
         services.AddScoped<IInventoryService, InventoryService>();
         services.AddScoped<LoginAttemptService>();
         services.AddScoped<TokenBlocklistService>();
+        services.AddScoped<SessionValidityService>();
 
         return services;
     }

@@ -37,6 +37,27 @@ public class UserSession : BaseEntity
 
     public DateTime ExpiresAt { get; set; }
 
+    /// <summary>
+    /// Human-readable device name, e.g. "Pixel 7 · Android" or "Chrome on Windows". DB: label.
+    /// </summary>
+    /// <remarks>
+    /// Without it the sessions list is a column of UUIDs, and an owner asked "is one of these not
+    /// yours?" has no way to answer. That matters most in the case this table exists to make safe: a
+    /// second copy of the app — an OEM dual-app clone, a work profile, a handset someone else had for
+    /// ten minutes — is a perfectly ordinary second session, indistinguishable from a legitimate one
+    /// except by what device it says it is.
+    /// </remarks>
+    public string? Label { get; set; }
+
+    /// <summary>
+    /// When this session last exchanged its refresh token. DB: last_seen_at.
+    /// </summary>
+    /// <remarks>
+    /// Updated on rotation rather than per request — roughly hourly, which is precise enough to tell
+    /// "in use today" from "not since March" and costs no extra write.
+    /// </remarks>
+    public DateTime? LastSeenAt { get; set; }
+
     /// <summary>Null while the row is the live token for its session. Set on rotation, on sign-out,
     /// and when the whole chain is revoked.</summary>
     public DateTime? RevokedAt { get; set; }

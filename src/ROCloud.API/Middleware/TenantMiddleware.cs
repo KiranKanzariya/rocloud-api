@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using ROCloud.Application.Common.Interfaces;
+using ROCloud.Application.Features.Auth.Common;
 using ROCloud.Domain.Entities.Platform;
 using ROCloud.Domain.Enums;
 
@@ -31,8 +32,6 @@ public class TenantMiddleware
     // to pay and restore access — otherwise the payment block would be an inescapable dead-end.
     // Includes /api/plans because the renew/upgrade modal must load the plan list to pay.
     private static readonly string[] BillingSelfServicePrefixes = { "/api/subscription", "/api/plans" };
-
-    private static readonly string[] ReservedHostLabels = { "localhost", "api", "admin", "www" };
 
     private readonly RequestDelegate _next;
 
@@ -161,10 +160,11 @@ public class TenantMiddleware
             return await db.Tenants.AsNoTracking().Include(t => t.Plan)
                 .FirstOrDefaultAsync(t => t.Subdomain == headerSubdomain);
 
-        // 2. Subdomain extracted from the request host
+        // 2. Subdomain extracted from the request host. Reserved labels come from ReservedSubdomains,
+        // the one definition shared with AuthController and enforced at registration — this file used
+        // to keep its own copy, and the two had drifted apart.
         var label = context.Request.Host.Host.Split('.').FirstOrDefault();
-        if (!string.IsNullOrWhiteSpace(label) &&
-            !ReservedHostLabels.Contains(label, StringComparer.OrdinalIgnoreCase))
+        if (!string.IsNullOrWhiteSpace(label) && !ReservedSubdomains.IsPlatformHostLabel(label))
         {
             var bySubdomain = await db.Tenants.AsNoTracking().Include(t => t.Plan)
                 .FirstOrDefaultAsync(t => t.Subdomain == label);

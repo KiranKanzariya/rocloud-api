@@ -21,7 +21,7 @@ public class TenantBlockedSignInTests
     private const string StaffEmail = "driver@acme.test";
 
     private static AuthTokenIssuer NewIssuer(AppDbContext db)
-        => new(db, new FakeTokenService(), new FakeAppSettings());
+        => new(db, new FakeTokenService(), new FakeAppSettings(), new FakeDeviceContext());
 
     /// <summary>Adds a non-owner (delivery boy) alongside the seeded Owner, with Role navigation loaded.</summary>
     private static async Task<User> AddStaffAsync(AppDbContext db, Guid tenantId)
@@ -128,7 +128,7 @@ public class TenantBlockedSignInTests
         var handler = new LoginCommandHandler(
             db,
             new PasswordService(new ConfigurationBuilder().Build()),
-            new LoginAttemptService(AuthTestHelpers.NewCache(), new FakeAppSettings()),
+            new LoginAttemptService(new FakeAppSettings()),
             NewIssuer(db));
 
         // The password is correct — the refusal must not masquerade as bad credentials.

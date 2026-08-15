@@ -21,7 +21,22 @@ namespace ROCloud.Application.Common.Security;
 /// </remarks>
 public static class UserSessions
 {
-    /// <summary>Ends every live session for a user.</summary>
+    /// <summary>Ends every live session for a user — both the refresh chains and the access tokens.</summary>
+    /// <remarks>
+    /// The access-token half is the part that used to be missing, and it was the important one.
+    /// Revoking refresh chains only stops NEW access tokens being minted; every token already issued
+    /// stayed valid for the rest of its hour. So a password reset, a deactivation or a deletion took up
+    /// to <c>Jwt:AccessTokenExpiryMinutes</c> to lock anyone out of anything — on every device at once.
+    /// <para>
+    /// Stamping <c>SessionsValidFrom</c> here rather than at each call site is deliberate: there are
+    /// four callers today and every one of them wants both halves, so making it impossible to do one
+    /// without the other removes a whole class of future bug.
+    /// </para>
+    /// <para>
+    /// <c>SessionValidityService</c> reads the stamp through a 60-second cache, so a revocation bites
+    /// within a minute rather than instantly. That bound is the point — see the note there.
+    /// </para>
+    /// </remarks>
     public static async Task RevokeAllAsync(IAppDbContext db, Guid userId, CancellationToken ct)
     {
         var now = DateTime.UtcNow;
@@ -31,6 +46,12 @@ public static class UserSessions
 
         foreach (var session in live)
             session.RevokedAt = now;
+
+        // IgnoreQueryFilters: a deletion sets IsDeleted in the same unit of work, and the tenant filter
+        // would otherwise hide the very row being revoked.
+        var user = await db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Id == userId, ct);
+        if (user is not null)
+            user.SessionsValidFrom = now;
     }
 
     /// <summary>

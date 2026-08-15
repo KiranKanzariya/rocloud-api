@@ -38,6 +38,13 @@ public interface IAppSettings
     /// <summary>Password-reset token lifetime in minutes (Security:PasswordResetTokenTtlMinutes). Default 60.</summary>
     int PasswordResetTokenTtlMinutes { get; }
 
+    /// <summary>
+    /// Lifetime of a platform "Open as owner" impersonation token, in minutes
+    /// (Platform:ImpersonationMinutes). Default 15 — deliberately shorter than a real session, because
+    /// there is no refresh and therefore no way to shorten it after the fact.
+    /// </summary>
+    int ImpersonationMinutes { get; }
+
     /// <summary>Default GST rate when none is supplied (Billing:GstRate). Default 0.18.</summary>
     decimal DefaultGstRate { get; }
 

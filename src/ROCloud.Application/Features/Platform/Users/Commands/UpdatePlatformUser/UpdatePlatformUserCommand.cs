@@ -36,11 +36,13 @@ public class UpdatePlatformUserCommandHandler : IRequestHandler<UpdatePlatformUs
         user.Name = request.Name;
         user.PlatformRole = request.PlatformRole;
         user.IsActive = request.IsActive;
-        // Deactivation revokes any active session.
+        // Deactivation revokes any active session — access token included. Without the stamp, a staff
+        // member switched off kept full platform access until their current token expired.
         if (!request.IsActive)
         {
             user.RefreshToken = null;
             user.RefreshTokenExpiresAt = null;
+            user.SessionsValidFrom = DateTime.UtcNow;
         }
         await _db.SaveChangesAsync(ct);
     }

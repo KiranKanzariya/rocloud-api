@@ -14,9 +14,9 @@ public class LoginCommandTests
     {
         await using var db = AuthTestHelpers.NewDb();
         await AuthTestHelpers.SeedAsync(db);
-        var attempts = new LoginAttemptService(AuthTestHelpers.NewCache(), new FakeAppSettings());
+        var attempts = new LoginAttemptService(new FakeAppSettings());
         var handler = new LoginCommandHandler(db, new Infrastructure.Identity.PasswordService(new ConfigurationBuilder().Build()), attempts,
-            new AuthTokenIssuer(db, new FakeTokenService(), new FakeAppSettings()));
+            new AuthTokenIssuer(db, new FakeTokenService(), new FakeAppSettings(), new FakeDeviceContext()));
 
         var result = await handler.Handle(
             new LoginCommand(AuthTestHelpers.OwnerEmail, AuthTestHelpers.ValidPassword, AuthTestHelpers.Subdomain),
@@ -39,21 +39,21 @@ public class LoginCommandTests
     {
         await using var db = AuthTestHelpers.NewDb();
         await AuthTestHelpers.SeedAsync(db);
-        var attempts = new LoginAttemptService(AuthTestHelpers.NewCache(), new FakeAppSettings());
+        var attempts = new LoginAttemptService(new FakeAppSettings());
         var handler = new LoginCommandHandler(db, new Infrastructure.Identity.PasswordService(new ConfigurationBuilder().Build()), attempts,
-            new AuthTokenIssuer(db, new FakeTokenService(), new FakeAppSettings()));
+            new AuthTokenIssuer(db, new FakeTokenService(), new FakeAppSettings(), new FakeDeviceContext()));
 
         await Assert.ThrowsAsync<InvalidCredentialsException>(() => handler.Handle(
             new LoginCommand(AuthTestHelpers.OwnerEmail, "WrongPassword!1", AuthTestHelpers.Subdomain),
             CancellationToken.None));
 
-        // The failure was recorded against this identifier.
-        var clientId = $"{AuthTestHelpers.OwnerEmail}:{AuthTestHelpers.Subdomain}".ToLowerInvariant();
-        var count = await attempts.RecordFailureAsync(clientId); // returns running total (now 2)
-        Assert.Equal(2, count);
+        // The failure was recorded ON THE USER ROW, and persisted — it used to be an in-memory
+        // counter that an API restart wiped, which turned the lockout into a delay.
+        var owner = await db.Users.IgnoreQueryFilters().FirstAsync();
+        Assert.Equal(1, owner.FailedLoginAttempts);
 
         // No session was issued.
-        var owner = await db.Users.IgnoreQueryFilters().FirstAsync();
+        Assert.Empty(await db.UserSessions.ToListAsync());
         Assert.True(string.IsNullOrEmpty(owner.RefreshToken));
     }
 
@@ -62,9 +62,9 @@ public class LoginCommandTests
     {
         await using var db = AuthTestHelpers.NewDb();
         await AuthTestHelpers.SeedAsync(db);
-        var attempts = new LoginAttemptService(AuthTestHelpers.NewCache(), new FakeAppSettings());
+        var attempts = new LoginAttemptService(new FakeAppSettings());
         var handler = new LoginCommandHandler(db, new Infrastructure.Identity.PasswordService(new ConfigurationBuilder().Build()), attempts,
-            new AuthTokenIssuer(db, new FakeTokenService(), new FakeAppSettings()));
+            new AuthTokenIssuer(db, new FakeTokenService(), new FakeAppSettings(), new FakeDeviceContext()));
 
         var badLogin = new LoginCommand(AuthTestHelpers.OwnerEmail, "WrongPassword!1", AuthTestHelpers.Subdomain);
 

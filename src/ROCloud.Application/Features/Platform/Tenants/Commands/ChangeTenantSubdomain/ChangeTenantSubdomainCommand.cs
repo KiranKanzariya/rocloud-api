@@ -28,9 +28,8 @@ public class ChangeTenantSubdomainCommandValidator : AbstractValidator<ChangeTen
 
 public class ChangeTenantSubdomainCommandHandler : IRequestHandler<ChangeTenantSubdomainCommand, string>
 {
-    // Host labels that belong to the platform itself — a tenant may never claim these.
-    private static readonly HashSet<string> Reserved =
-        new(StringComparer.OrdinalIgnoreCase) { "localhost", "api", "admin", "www", "app" };
+    // Reserved names now live in ReservedSubdomains — this used to keep its own shorter copy, and
+    // registration (which is where a tenant actually picks a name) had no list at all.
 
     private readonly IAppDbContext _db;
 
@@ -41,7 +40,7 @@ public class ChangeTenantSubdomainCommandHandler : IRequestHandler<ChangeTenantS
         var slug = SubdomainSlug.From(request.Subdomain);
         if (slug.Length < 3 || slug.Length > 63)
             throw Invalid("Enter a valid subdomain (3–63 letters, numbers or hyphens).");
-        if (Reserved.Contains(slug))
+        if (ReservedSubdomains.IsReserved(slug))
             throw Invalid($"'{slug}' is reserved and can't be used.");
 
         var tenant = await _db.Tenants.IgnoreQueryFilters()

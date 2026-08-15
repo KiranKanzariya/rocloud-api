@@ -22,7 +22,7 @@ public class RefreshTokenCommandTests
         Build(Infrastructure.Persistence.AppDbContext db)
     {
         var tokens = new FakeTokenService();
-        var issuer = new AuthTokenIssuer(db, tokens, new FakeAppSettings());
+        var issuer = new AuthTokenIssuer(db, tokens, new FakeAppSettings(), new FakeDeviceContext());
         return (new RefreshTokenCommandHandler(db, tokens, issuer), issuer, tokens);
     }
 

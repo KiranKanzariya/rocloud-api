@@ -49,6 +49,15 @@ public class RegisterCommandHandler : IRequestHandler<RegisterCommand, AuthResul
                 ["subdomain"] = ["Could not derive a valid subdomain from the business name."]
             });
 
+        // Checked after slugification, not in the validator: the name is usually DERIVED from the
+        // business name rather than typed, so "Support Waters" would have slugged straight onto a
+        // reserved host without anyone having asked for it.
+        if (ReservedSubdomains.IsReserved(subdomain))
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["subdomain"] = [$"The subdomain '{subdomain}' is reserved. Please choose another."]
+            });
+
         var taken = await _db.Tenants.IgnoreQueryFilters()
             .AnyAsync(t => t.Subdomain == subdomain && !t.IsDeleted, ct);
         if (taken)

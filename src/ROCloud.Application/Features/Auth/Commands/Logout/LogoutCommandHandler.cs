@@ -24,20 +24,27 @@ public class LogoutCommandHandler : IRequestHandler<LogoutCommand>
 
     public async Task Handle(LogoutCommand request, CancellationToken ct)
     {
+        // Blocklist the access token when there is one. There often is not: sign-out is anonymous
+        // precisely so it still works after the access token has expired, and an expired token needs
+        // no blocklisting.
         if (_currentUser.Jti is { } jti && _currentUser.AccessTokenExpiresAt is { } expiresAt)
             await _blocklist.BlockAsync(jti, expiresAt, ct);
 
-        if (_currentUser.UserId is not { } userId || string.IsNullOrEmpty(request.RefreshToken))
+        if (string.IsNullOrEmpty(request.RefreshToken))
             return;
 
-        // This device only. Signing out of the phone leaves the portal signed in, which is what an
-        // owner expects and what the single-token design could not do.
+        // Found by token hash ALONE — deliberately not scoped to the signed-in user. The endpoint is
+        // anonymous now, so on an expired access token there is no user to scope to, and requiring one
+        // would silently turn sign-out back into "clears the cookie, leaves the session live". The hash
+        // is sufficient authority on its own: token_hash is UNIQUE, and only the holder of the token
+        // can produce it.
         var hash = _tokens.HashRefreshToken(request.RefreshToken);
-        var session = await _db.UserSessions
-            .FirstOrDefaultAsync(s => s.UserId == userId && s.TokenHash == hash, ct);
+        var session = await _db.UserSessions.FirstOrDefaultAsync(s => s.TokenHash == hash, ct);
 
         if (session is null) return;
 
+        // This device only. Signing out of the phone leaves the portal signed in, which is what an
+        // owner expects and what the single-token design could not do.
         await UserSessions.RevokeChainAsync(_db, session.SessionId, ct);
         await _db.SaveChangesAsync(ct);
     }

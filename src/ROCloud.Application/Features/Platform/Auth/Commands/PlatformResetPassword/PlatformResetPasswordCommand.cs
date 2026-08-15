@@ -43,9 +43,12 @@ public class PlatformResetPasswordCommandHandler : IRequestHandler<PlatformReset
                    ?? throw new NotFoundException("PlatformUser", data.UserId);
 
         user.PasswordHash = _passwords.Hash(request.NewPassword);
-        // Revoke existing sessions after a reset.
+        // Revoke existing sessions after a reset — both halves. Clearing the refresh token alone left
+        // any outstanding access token working for the rest of its hour, which on an account that
+        // reaches every workspace is the whole point of resetting the password.
         user.RefreshToken = null;
         user.RefreshTokenExpiresAt = null;
+        user.SessionsValidFrom = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
 
         await _cache.RemoveAsync(key, ct);

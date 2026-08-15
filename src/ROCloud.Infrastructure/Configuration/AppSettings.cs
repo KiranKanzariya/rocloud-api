@@ -31,6 +31,7 @@ public sealed class AppSettings : IAppSettings
     public int MaxLoginAttempts => Int("Security:MaxLoginAttempts", 5);
     public int LockoutMinutes => Int("Security:LockoutMinutes", 15);
     public int PasswordResetTokenTtlMinutes => Int("Security:PasswordResetTokenTtlMinutes", 60);
+    public int ImpersonationMinutes => Int("Platform:ImpersonationMinutes", 15);
     public decimal DefaultGstRate =>
         decimal.TryParse(_config["Billing:GstRate"], out var v) ? v : 0.18m;
     public int InvoiceDueInDays => Int("Billing:DefaultDueInDays", 15);

@@ -17,8 +17,10 @@ namespace ROCloud.Application.Tests.Auth;
 /// <summary>Deterministic fake token service so refresh-hash comparisons are stable in tests.</summary>
 public sealed class FakeTokenService : ITokenService
 {
-    public GeneratedAccessToken GenerateAccessToken(User user, Tenant tenant, IReadOnlyCollection<string> permissions)
-        => new("access-token", DateTime.UtcNow.AddMinutes(60));
+    public GeneratedAccessToken GenerateAccessToken(
+        User user, Tenant tenant, IReadOnlyCollection<string> permissions,
+        TimeSpan? lifetime = null, string? actAs = null, Guid? sessionId = null)
+        => new("access-token", DateTime.UtcNow.Add(lifetime ?? TimeSpan.FromMinutes(60)));
 
     public GeneratedAccessToken GeneratePlatformToken(PlatformUser platformUser)
         => new("platform-access-token", DateTime.UtcNow.AddMinutes(60));
@@ -41,6 +43,15 @@ public sealed class FakeTokenService : ITokenService
     }
 }
 
+/// <summary>
+/// Device label for tests. Defaults to null — the label is cosmetic, so most tests should not have to
+/// think about it; the ones that assert on it set <see cref="Label"/>.
+/// </summary>
+public sealed class FakeDeviceContext : IDeviceContext
+{
+    public string? Label { get; init; }
+}
+
 /// <summary>Default operational settings for tests (mirrors the production fallbacks).</summary>
 public sealed class FakeAppSettings : IAppSettings
 {
@@ -52,6 +63,7 @@ public sealed class FakeAppSettings : IAppSettings
     public int MaxLoginAttempts => 5;
     public int LockoutMinutes => 15;
     public int PasswordResetTokenTtlMinutes => 60;
+    public int ImpersonationMinutes => 15;
     public decimal DefaultGstRate => 0.18m;
     public int InvoiceDueInDays => 15;
     public int InvoiceLinkExpiryDays => 7;

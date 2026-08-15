@@ -62,10 +62,10 @@ public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, A
             throw new InvalidCredentialsException();
 
         // Rotation: this row stops being the live token, and the issuer writes the next one under the
-        // same SessionId, so the device keeps its identity across the swap.
+        // same SessionId, so the device keeps its identity — and its name — across the swap.
         session.RevokedAt = now;
 
-        return await IssueForAsync(user, session.SessionId, ct);
+        return await IssueForAsync(user, session.SessionId, ct, session.Label);
     }
 
     /// <summary>
@@ -120,7 +120,7 @@ public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, A
     }
 
     private async Task<AuthResult> IssueForAsync(
-        Domain.Entities.Tenant.User user, Guid? sessionId, CancellationToken ct)
+        Domain.Entities.Tenant.User user, Guid? sessionId, CancellationToken ct, string? carriedLabel = null)
     {
         var tenant = await _db.Tenants.IgnoreQueryFilters().Include(t => t.Plan)
             .FirstOrDefaultAsync(t => t.Id == user.TenantId, ct);
@@ -132,6 +132,6 @@ public class RefreshTokenCommandHandler : IRequestHandler<RefreshTokenCommand, A
             .Select(rp => rp.Permission!.Code)
             .ToArray() ?? [];
 
-        return await _issuer.IssueAsync(user, tenant, permissions, ct, sessionId);
+        return await _issuer.IssueAsync(user, tenant, permissions, ct, sessionId, carriedLabel);
     }
 }

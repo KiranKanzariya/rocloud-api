@@ -8,7 +8,18 @@ namespace ROCloud.Application.Common.Interfaces;
 public interface ITokenService
 {
     /// <summary>Issues a signed JWT (60 min) with all ROCloud claims, including a unique jti.</summary>
-    GeneratedAccessToken GenerateAccessToken(User user, Tenant tenant, IReadOnlyCollection<string> permissions);
+    /// <param name="lifetime">Overrides Jwt:AccessTokenExpiryMinutes — used by platform impersonation.</param>
+    /// <param name="actAs">
+    /// Who is really driving when that is not <paramref name="user"/> (the <c>act</c> claim). Set during
+    /// impersonation so the audit trail names the operator, not just the owner they are acting as.
+    /// </param>
+    /// <param name="sessionId">
+    /// The signed-in device this token belongs to (the <c>sid</c> claim), so the sessions list can mark
+    /// one row as the current one. Null for impersonation, which creates no session.
+    /// </param>
+    GeneratedAccessToken GenerateAccessToken(
+        User user, Tenant tenant, IReadOnlyCollection<string> permissions,
+        TimeSpan? lifetime = null, string? actAs = null, Guid? sessionId = null);
 
     /// <summary>
     /// Issues a signed JWT for a platform staff member (super-admin portal, guide §26): claims
