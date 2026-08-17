@@ -174,6 +174,19 @@ public class InventoryTests
             Id = productId, TenantId = TenantA, Name = "20L Jar", BottleSize = BottleSize.TwentyL, DefaultRate = 40m
         });
         db.Customers.Add(new Customer { Id = customerId, TenantId = TenantA, Name = "Cust", Mobile = "9" });
+        // Four jars issued to them first. A return is only valid up to what the customer holds, so a
+        // fixture with nothing issued can only ever test the refusal.
+        db.InventoryMovements.Add(new InventoryMovement
+        {
+            Id = Guid.NewGuid(), TenantId = TenantA, ProductId = productId, CustomerId = customerId,
+            MovementType = InventoryMovementType.Issue, Quantity = 4,
+        });
+        var inventory = new Domain.Entities.Tenant.Inventory
+        {
+            Id = Guid.NewGuid(), TenantId = TenantA, ProductId = productId,
+            IssuedStock = 4, LastUpdated = DateTime.UtcNow,
+        };
+        db.Inventories.Add(inventory);
         await db.SaveChangesAsync();
         return customerId;
     }
@@ -195,7 +208,10 @@ public class InventoryTests
 
         var inv = await db.Inventories.FirstAsync(i => i.ProductId == productId);
         Assert.Equal(3, inv.ReturnedStock);
-        Assert.Equal(-3, inv.IssuedStock); // issued float reduced (jars came back from the customer)
+        // 4 were out, 3 came back — one still with the customer. This used to assert -3, a NEGATIVE
+        // issued float from a customer who had been issued nothing: the missing holdings guard,
+        // written down as expected behaviour.
+        Assert.Equal(1, inv.IssuedStock);
 
         var movement = await db.InventoryMovements.FirstAsync(m => m.Id == id.MovementId);
         Assert.Equal(InventoryMovementType.Return, movement.MovementType);

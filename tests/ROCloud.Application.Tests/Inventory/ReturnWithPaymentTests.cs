@@ -55,6 +55,13 @@ public class ReturnWithPaymentTests
         {
             Id = customerId, TenantId = TenantA, Name = "Kamlesh Parshotam", Mobile = "9978551402",
         });
+        // Jars have to have gone OUT before they can come back. Without this the return is refused —
+        // which is the point of the holdings guard, and what these tests used to rely on not existing.
+        db.InventoryMovements.Add(new InventoryMovement
+        {
+            Id = Guid.NewGuid(), TenantId = TenantA, ProductId = productId, CustomerId = customerId,
+            MovementType = InventoryMovementType.Issue, Quantity = 5,
+        });
         await db.SaveChangesAsync();
         return (customerId, productId);
     }
@@ -77,7 +84,7 @@ public class ReturnWithPaymentTests
         Assert.NotNull(result.PaymentId);
         Assert.Equal(300m, result.CollectedAmount);
 
-        var movement = await db.InventoryMovements.FirstAsync();
+        var movement = await db.InventoryMovements.FirstAsync(m => m.MovementType != InventoryMovementType.Issue);
         Assert.Equal(InventoryMovementType.Return, movement.MovementType);
         Assert.Equal(2, movement.Quantity);
 
@@ -103,7 +110,7 @@ public class ReturnWithPaymentTests
         Assert.Null(result.PaymentId);
         Assert.Equal(0m, result.CollectedAmount);
         Assert.Empty(await db.Payments.ToListAsync());
-        Assert.Single(await db.InventoryMovements.ToListAsync());
+        Assert.Single(await db.InventoryMovements.Where(m => m.MovementType != InventoryMovementType.Issue).ToListAsync());
     }
 
     [Fact]
@@ -136,7 +143,7 @@ public class ReturnWithPaymentTests
                 CollectedAmount: 120m, PaymentMethod: nameof(PaymentMethod.UPI)),
             CancellationToken.None);
 
-        var movement = await db.InventoryMovements.FirstAsync();
+        var movement = await db.InventoryMovements.FirstAsync(m => m.MovementType != InventoryMovementType.Issue);
         var payment = await db.Payments.FirstAsync();
         Assert.Equal(twoDaysAgo, AppTimeZone.Today(movement.CreatedAt));
         Assert.Equal(twoDaysAgo, AppTimeZone.Today(payment.PaidAt));
@@ -160,7 +167,7 @@ public class ReturnWithPaymentTests
         // And nothing at all was written — not even the jars, which would otherwise leave the counter
         // visit half-recorded in the very way this feature exists to prevent.
         Assert.Empty(await db.Payments.ToListAsync());
-        Assert.Empty(await db.InventoryMovements.ToListAsync());
+        Assert.Empty(await db.InventoryMovements.Where(m => m.MovementType != InventoryMovementType.Issue).ToListAsync());
     }
 
     [Fact]
@@ -174,7 +181,7 @@ public class ReturnWithPaymentTests
             new RecordCustomerReturnCommand(customerId, productId, 2, null, null),
             CancellationToken.None);
 
-        Assert.Single(await db.InventoryMovements.ToListAsync());
+        Assert.Single(await db.InventoryMovements.Where(m => m.MovementType != InventoryMovementType.Issue).ToListAsync());
     }
 
     [Theory]

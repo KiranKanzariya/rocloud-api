@@ -5,6 +5,7 @@ using ROCloud.Application.Common;
 using ROCloud.Application.Common.Exceptions;
 using ROCloud.Application.Common.Interfaces;
 using ROCloud.Application.Common.Settings;
+using ROCloud.Application.Features.Customers;
 using ROCloud.Application.Features.Payments;
 using ROCloud.Application.Services;
 using ROCloud.Domain.Entities.Tenant;
@@ -94,6 +95,11 @@ public class RecordCustomerReturnCommandHandler : IRequestHandler<RecordCustomer
         var productExists = await _db.Products.AnyAsync(p => p.Id == request.ProductId, ct);
         if (!productExists)
             throw new NotFoundException("Product", request.ProductId);
+
+        // More jars cannot come back than went out. See CustomerJarHoldings for why an unguarded
+        // over-return is invisible rather than merely wrong.
+        await CustomerJarHoldings.EnsureCanReturnAsync(
+            _db, request.CustomerId, request.ProductId, request.Quantity, "quantity", ct);
 
         // Get-or-create the product's inventory row and move the float (issued−, returned+), mirroring
         // AddInventoryMovement so the manual and delivery-driven paths never diverge.

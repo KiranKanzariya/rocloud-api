@@ -63,6 +63,16 @@ public class AddInventoryMovementCommandHandler : IRequestHandler<AddInventoryMo
 
         var type = Enum.Parse<InventoryMovementType>(request.MovementType);
 
+        // A Return or Damage carrying a CustomerId is jars coming back out of that customer's hands,
+        // so the same ceiling applies here as on the dedicated returns endpoint — otherwise this
+        // generic endpoint stays the unguarded way to drive a customer's holdings below zero.
+        if (request.CustomerId is { } fromCustomer
+            && type is InventoryMovementType.Return or InventoryMovementType.Damage)
+        {
+            await Customers.CustomerJarHoldings.EnsureCanReturnAsync(
+                _db, fromCustomer, request.ProductId, request.Quantity, "quantity", ct);
+        }
+
         var inv = await _db.Inventories.FirstOrDefaultAsync(i => i.ProductId == request.ProductId, ct);
         if (inv is null)
         {
