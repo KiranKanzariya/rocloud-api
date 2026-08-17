@@ -82,24 +82,11 @@ public class CollectPaymentCommandHandler : IRequestHandler<CollectPaymentComman
                 });
         }
 
-        var payment = new Payment
-        {
-            Id = Guid.NewGuid(),
-            TenantId = _tenant.TenantId,
-            CustomerId = customer.Id,
-            InvoiceId = request.InvoiceId,
-            OrderId = request.OrderId,
-            Amount = request.Amount,
-            PaymentMethod = Enum.Parse<PaymentMethod>(request.PaymentMethod),
-            PaymentPreference = customer.PaymentPreference,
-            Status = PaymentStatus.Completed,
-            ReferenceNumber = request.ReferenceNumber,
-            CollectedBy = _currentUser.UserId,
-            // Backdated → midday of that calendar day (app zone) so it reports on the right day; else now.
-            PaidAt = request.PaidOn is { } paidOn ? AppTimeZone.MiddayUtc(paidOn) : DateTime.UtcNow,
-            Notes = request.Notes
-        };
-        _db.Payments.Add(payment);
+        var payment = PaymentRecording.Add(
+            _db, _tenant, _currentUser, customer,
+            request.Amount, Enum.Parse<PaymentMethod>(request.PaymentMethod),
+            request.PaidOn, request.Notes,
+            request.InvoiceId, request.OrderId, request.ReferenceNumber);
 
         if (invoice is not null)
             PaymentApplication.ApplyToInvoice(invoice, request.Amount);

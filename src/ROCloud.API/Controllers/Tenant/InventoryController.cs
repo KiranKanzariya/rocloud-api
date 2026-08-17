@@ -50,14 +50,24 @@ public class InventoryController : ControllerBase
     /// <summary>
     /// Records empty jars a customer handed back with no delivery to attach them to (moved house, missed
     /// on the day). May be backdated within the platform window. Reduces the customer's outstanding jars.
+    ///
+    /// <para>Optionally records money handed over at the same moment — the counter case, where the jars
+    /// and the cash are one event. That half additionally requires Payments.Collect, checked in the
+    /// handler.</para>
     /// </summary>
     [HttpPost("returns")]
     [RequirePermission("Inventory.Manage")]
     public async Task<IActionResult> RecordCustomerReturn(
         [FromBody] RecordCustomerReturnCommand command, CancellationToken ct)
     {
-        var id = await _mediator.Send(command, ct);
-        return Ok(ApiResponse<object>.Ok(new { id }));
+        var result = await _mediator.Send(command, ct);
+        // `id` stays for the existing callers; the payment is reported alongside it.
+        return Ok(ApiResponse<object>.Ok(new
+        {
+            id = result.MovementId,
+            paymentId = result.PaymentId,
+            collectedAmount = result.CollectedAmount,
+        }));
     }
 
     [HttpPost("reconcile")]

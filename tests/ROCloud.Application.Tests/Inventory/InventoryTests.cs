@@ -197,7 +197,7 @@ public class InventoryTests
         Assert.Equal(3, inv.ReturnedStock);
         Assert.Equal(-3, inv.IssuedStock); // issued float reduced (jars came back from the customer)
 
-        var movement = await db.InventoryMovements.FirstAsync(m => m.Id == id);
+        var movement = await db.InventoryMovements.FirstAsync(m => m.Id == id.MovementId);
         Assert.Equal(InventoryMovementType.Return, movement.MovementType);
         Assert.Equal(customerId, movement.CustomerId);
         Assert.Equal(twoDaysAgo, AppTimeZone.Today(movement.CreatedAt));
