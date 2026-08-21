@@ -7,6 +7,7 @@ using ROCloud.Application.Common.Models;
 using ROCloud.Application.Features.Payments.Commands.CollectPayment;
 using ROCloud.Application.Features.Payments.Commands.ConfirmRazorpayPayment;
 using ROCloud.Application.Features.Payments.Commands.InitiateRazorpayPayment;
+using ROCloud.Application.Features.Payments.Commands.ReversePayment;
 using ROCloud.Application.Features.Payments.Dtos;
 using ROCloud.Application.Features.Payments.Queries.GetCustomerUpiQr;
 using ROCloud.Application.Features.Payments.Queries.GetOutstandingDues;
@@ -70,6 +71,28 @@ public class PaymentsController : ControllerBase
         var id = await _mediator.Send(command, ct);
         return Ok(ApiResponse<object>.Ok(new { id }));
     }
+
+    /// <summary>
+    /// Takes back a payment recorded by mistake. Marks it Refunded and re-runs the customer's invoice
+    /// allocation; the row is kept, because a payment that was taken back is a fact an owner
+    /// reconciling a cash box needs to see.
+    /// </summary>
+    /// <remarks>
+    /// Guarded by <c>Payments.Collect</c> rather than a permission of its own: whoever may take money
+    /// off a customer is the person standing there when it goes in wrong, and a reversal they cannot
+    /// perform is a wrong balance that survives until an owner is asked.
+    /// </remarks>
+    [HttpPost("{id:guid}/reverse")]
+    [RequirePermission("Payments.Collect")]
+    public async Task<IActionResult> Reverse(
+        Guid id, [FromBody] ReversePaymentRequest? body, CancellationToken ct)
+    {
+        await _mediator.Send(new ReversePaymentCommand(id, body?.Reason), ct);
+        return Ok(ApiResponse<object>.Ok(new { id, status = nameof(Domain.Enums.PaymentStatus.Refunded) }));
+    }
+
+    /// <summary>Optional body, so the app can reverse with no ceremony: `POST …/reverse` alone works.</summary>
+    public sealed record ReversePaymentRequest(string? Reason);
 
     [HttpPost("razorpay/initiate")]
     [RequirePermission("Payments.Collect")]
